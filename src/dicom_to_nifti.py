@@ -21,6 +21,10 @@ for instance in os.listdir(dicom_directory):
             input_dir = root
             output_dir = os.path.join(output_dir_root, parent_folder_name+'.nii.gz')
             
+            if os.path.exists(output_dir):
+                idx += 1
+                continue
+            
             print(f"Converting {input_dir} to {output_dir}")
             dicom2nifti.dicom_series_to_nifti(root, output_dir, reorient_nifti=True)
             idx += 1
