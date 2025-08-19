@@ -26,5 +26,5 @@ for instance in os.listdir(dicom_directory):
                 continue
             
             print(f"Converting {input_dir} to {output_dir}")
-            dicom2nifti.dicom_series_to_nifti(root, output_dir, reorient_nifti=True)
+            dicom2nifti.dicom_series_to_nifti(root, output_dir, reorient_nifti=False)
             idx += 1
