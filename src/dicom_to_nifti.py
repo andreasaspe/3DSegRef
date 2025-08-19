@@ -3,7 +3,7 @@ import dicom2nifti
  
 # Example usage
 dicom_directory = "/scratch/awias/data/manifest-1599750808610/Pancreas-CT"
-output_dir_root = "/scratch/awias/data/Pancreas"
+output_dir_root = "/scratch/awias/data/Pancreas/images"
 
 os.makedirs(output_dir_root, exist_ok=True)
 
