@@ -9,3 +9,23 @@ NiftiImageIO (0x927ad00): /scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_raw
 
 WARNING: In /tmp/SimpleITK-build/ITK/Modules/IO/NIFTI/src/itkNiftiImageIO.cxx, line 2008
 NiftiImageIO (0x927ad00): /scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_raw/Dataset001_Pancreas/labelsTr/32.nii.gz has unexpected scales in sform
+
+
+from dynamic_network_architectures.architectures.unet import ResidualEncoderUNet
+    
+    
+class MyNetwork(ResidualEncoderUNet):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    
+    
+    def forward(self, x):
+        outputs = super().forward(x)
+        # custom processing of outputs if needed
+        return outputs
+        
+
+network = MyNetwork()
+network.load_state_dict(model.state_dict())
