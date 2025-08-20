@@ -274,7 +274,7 @@ def run_training_entry():
 def get_trainer(fold = 0):
     import argparse
     arg_dict = {
-        'dataset_name_or_id': 1,
+        'dataset_name_or_id': '1',
         'configuration': '3d_fullres' ,
         'fold': fold,
         'tr': 'nnUNetTrainerNoMirroring',
@@ -287,7 +287,7 @@ def get_trainer(fold = 0):
         'disable_checkpointing': "",
         'val_best': "",
         'device': 'cuda',
-        'return_trainer': True
+        'return_trainer': False
     }
     from argparse import Namespace
     args = Namespace(**arg_dict)
