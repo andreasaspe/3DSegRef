@@ -4,7 +4,7 @@ import os
 import json
 
 # folders containing dataset
-root = "/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_raw/Dataset001_Pancreas"
+root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset001_Verse20"
 
 images_tr_dir = os.path.join(root,"imagesTr")
 images_ts_dir = os.path.join(root,"imagesTs")
@@ -17,8 +17,8 @@ train_labels = sorted([f for f in os.listdir(labels_tr_dir) if f.endswith(".nii.
 
 # structure of the dataset.json
 dataset = {
-    "name": "Dataset001_Pancreas",  # change name
-    "description": "Dataset for pancreas segmentation", #change description
+    "name": "Dataset001_Verse20",  # change name
+    "description": "Dataset for vertebrae segmentation", #change description
     "reference": "",
     "licence": "",
     "release": "1.0",
@@ -30,7 +30,7 @@ dataset = {
     "file_ending":".nii.gz",
     "labels": {
         "background": "0", #change labels if needed
-        "pancreas": "1"
+        "vertebrae": "1"
     },
     "numTraining": len(train_images),
     "numTest": len(test_images),
