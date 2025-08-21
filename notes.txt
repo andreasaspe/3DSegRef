@@ -3,12 +3,29 @@ export nnUNet_results="/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_result
 export nnUNet_preprocessed="/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_preprocessed"
 
 
+export nnUNet_raw="/scratch/awias/data/nnUNet/nnUNet_raw"
+export nnUNet_results="/scratch/awias/data/nnUNet/nnUNet_results"
+export nnUNet_preprocessed="/scratch/awias/data/nnUNet/nnUNet_preprocessed"
+
+
+
+export nnUNet_raw="/home/awias/data/nnUNet/nnUNet_raw"
+export nnUNet_results="/home/awias/data/nnUNet/nnUNet_results"
+export nnUNet_preprocessed="/home/awias/data/nnUNet/nnUNet_preprocessed"
+
+
+
 
 WARNING: In /tmp/SimpleITK-build/ITK/Modules/IO/NIFTI/src/itkNiftiImageIO.cxx, line 2008
 NiftiImageIO (0x927ad00): /scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_raw/Dataset001_Pancreas/labelsTr/32.nii.gz has unexpected scales in sform
 
 WARNING: In /tmp/SimpleITK-build/ITK/Modules/IO/NIFTI/src/itkNiftiImageIO.cxx, line 2008
 NiftiImageIO (0x927ad00): /scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_raw/Dataset001_Pancreas/labelsTr/32.nii.gz has unexpected scales in sform
+
+
+_internal_maybe_mirror_and_predict (i predict from raw data)
+
+
 
 
 from dynamic_network_architectures.architectures.unet import ResidualEncoderUNet
@@ -29,3 +46,15 @@ class MyNetwork(ResidualEncoderUNet):
 
 network = MyNetwork()
 network.load_state_dict(model.state_dict())
+
+
+
+nnUNetv2_predict -i /scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_raw/Dataset001_Pancreas/imagesTs -o predictions/ -d 1 -c 3d_fullres -f 0
+
+
+
+
+/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_results/Dataset001_Pancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres
+
+/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_results/Dataset001
+_Pancreas/nnUNetTrainer__nnUNetPlans__3d_fullres/dataset.json
