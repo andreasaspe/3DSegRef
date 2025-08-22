@@ -33,13 +33,13 @@ image_ids = sorted(image_ids)
 train_ids, test_ids = train_test_split(image_ids, test_size=0.2, random_state=42)
 
 # rename labels and images
-for image_id in tqdm(train_ids):
-    image_src = os.path.join(images_dir, f"PANCREAS_{int(image_id):04d}.nii.gz")
-    label_src = os.path.join(labels_dir, f"label{int(image_id):04d}.nii.gz")
+# for image_id in tqdm(train_ids):
+#     image_src = os.path.join(images_dir, f"PANCREAS_{int(image_id):04d}.nii.gz")
+#     label_src = os.path.join(labels_dir, f"label{int(image_id):04d}.nii.gz")
 
-    if os.path.exists(image_src) and os.path.exists(label_src):
-        shutil.copy(image_src, os.path.join(images_tr_dir, f"{image_id}_0000.nii.gz"))
-        shutil.copy(label_src, os.path.join(labels_tr_dir, f"{image_id}.nii.gz"))
+#     if os.path.exists(image_src) and os.path.exists(label_src):
+#         shutil.copy(image_src, os.path.join(images_tr_dir, f"{image_id}_0000.nii.gz"))
+#         shutil.copy(label_src, os.path.join(labels_tr_dir, f"{image_id}.nii.gz"))
 
 for image_id in tqdm(test_ids):
     image_src = os.path.join(images_dir, f"PANCREAS_{int(image_id):04d}.nii.gz")
