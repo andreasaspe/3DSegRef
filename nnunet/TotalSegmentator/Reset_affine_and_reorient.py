@@ -37,10 +37,13 @@ def reorient_to(img, axcodes_to=('P', 'I', 'R'), verb=False):
 
 
 
-# Base dataset directory
-# base_dir = "/scratch/awias/data/Totalsegmentator_dataset_v201"
-base_dir = "/home/awias/data/Totalsegmentator_dataset_v201"
-savepath_root = "/home/awias/data/Totalsegmentator_dataset_v201_filtered_liver"
+# Directories ubuntu
+# base_dir = "/home/awias/data/Totalsegmentator_dataset_v201"
+# savepath_root = "/home/awias/data/Totalsegmentator_dataset_v201_filtered_liver"
+
+# Directories titans
+base_dir = "/scratch/awias/data/Totalsegmentator_dataset_v201"
+savepath_root = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_liver"
 
 os.makedirs(savepath_root, exist_ok=True)
 
