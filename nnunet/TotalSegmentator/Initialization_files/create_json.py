@@ -4,7 +4,8 @@ import os
 import json
 
 # folders containing dataset
-root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas"
+# root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas"
+root = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas"
 
 images_tr_dir = os.path.join(root,"imagesTr")
 images_ts_dir = os.path.join(root,"imagesTs")

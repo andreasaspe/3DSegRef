@@ -3,14 +3,20 @@ from sklearn.model_selection import train_test_split
 import shutil
 from tqdm import tqdm
 
-data_folder = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
+# data_folder = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
+data_folder = "/home/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
 
 dataset_name_and_id = "Dataset004_TotalSegmentatorPancreas"
 
-output_image_tr_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/imagesTr"
-output_label_tr_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/labelsTr"
-output_image_ts_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/imagesTs"
-output_label_ts_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/labelsTs"
+# output_image_tr_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/imagesTr"
+# output_label_tr_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/labelsTr"
+# output_image_ts_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/imagesTs"
+# output_label_ts_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/labelsTs"
+
+output_image_tr_path = f"/home/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/imagesTr"
+output_label_tr_path = f"/home/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/labelsTr"
+output_image_ts_path = f"/home/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/imagesTs"
+output_label_ts_path = f"/home/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/labelsTs"
 
 all_subjects = [x.split('_')[0] for x in os.listdir(data_folder) if x.endswith("img.nii.gz")]
 
