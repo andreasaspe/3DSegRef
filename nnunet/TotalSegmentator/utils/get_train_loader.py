@@ -34,7 +34,8 @@ def get_trainer_from_args(dataset_name_or_id: Union[int, str],
                           fold: int,
                           trainer_name: str = 'nnUNetTrainer',
                           plans_identifier: str = 'nnUNetPlans',
-                          device: torch.device = torch.device('cuda')):
+                          device: torch.device = torch.device('cuda'),
+                          return_data_loader: bool = False):
     # load nnunet class and do sanity checks
     nnunet_trainer = recursive_find_python_class(join(nnunetv2.__path__[0], "training", "nnUNetTrainer"),
                                                 trainer_name, 'nnunetv2.training.nnUNetTrainer')
@@ -63,7 +64,7 @@ def get_trainer_from_args(dataset_name_or_id: Union[int, str],
     plans = load_json(plans_file)
     dataset_json = load_json(join(preprocessed_dataset_folder_base, 'dataset.json'))
     nnunet_trainer = nnunet_trainer(plans=plans, configuration=configuration, fold=fold,
-                                    dataset_json=dataset_json, device=device)
+                                    dataset_json=dataset_json, device=device, return_data_loader=return_data_loader)
     return nnunet_trainer
 
 
@@ -146,7 +147,8 @@ def run_training(dataset_name_or_id: Union[str, int],
                  disable_checkpointing: bool = False,
                  val_with_best: bool = False,
                  device: torch.device = torch.device('cuda'),
-                 return_trainer: bool = False, return_data_loader: bool = False):
+                 return_trainer: bool = False,
+                 return_data_loader: bool = False):
     if plans_identifier == 'nnUNetPlans':
         print("\n############################\n"
               "INFO: You are using the old nnU-Net default plans. We have updated our recommendations. "
@@ -271,10 +273,10 @@ def run_training_entry():
                  args.num_gpus, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
                  device=device)
 
-def get_trainer(fold = 0):
+def get_train_loader(fold = 0):
     import argparse
     arg_dict = {
-        'dataset_name_or_id': '1',
+        'dataset_name_or_id': '4',
         'configuration': '3d_fullres' ,
         'fold': fold,
         'tr': 'nnUNetTrainerNoMirroring',
@@ -287,7 +289,8 @@ def get_trainer(fold = 0):
         'disable_checkpointing': "",
         'val_best': "",
         'device': 'cuda',
-        'return_trainer': False
+        'return_trainer': False,
+        'return_data_loader': True
     }
     from argparse import Namespace
     args = Namespace(**arg_dict)
@@ -307,15 +310,21 @@ def get_trainer(fold = 0):
 
     return run_training(args.dataset_name_or_id, args.configuration, args.fold, args.tr, args.p, args.pretrained_weights,
                  args.num_gpus, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
-                 device=device, return_trainer=args.return_trainer)
+                 device=device, return_trainer=args.return_trainer, return_data_loader=args.return_data_loader)
 
 if __name__ == '__main__':
     os.environ['OMP_NUM_THREADS'] = '1'
     os.environ['MKL_NUM_THREADS'] = '1'
     os.environ['OPENBLAS_NUM_THREADS'] = '1'
+
+    os.environ['nnUNet_raw'] = "/home/awias/data/nnUNet/nnUNet_raw"
+    os.environ['nnUNet_preprocessed'] = "/home/awias/data/nnUNet/nnUNet_preprocessed"
+    os.environ['nnUNet_results'] = "/home/awias/data/nnUNet/nnUNet_results"
+
     # reduces the number of threads used for compiling. More threads don't help and can cause problems
     
     # os.environ['TORCHINDUCTOR_COMPILE_THREADS'] = 1
     # multiprocessing.set_start_method("spawn")
     
-    get_trainer()
+    get_train_loader()
+
