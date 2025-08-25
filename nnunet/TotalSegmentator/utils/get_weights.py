@@ -34,8 +34,7 @@ def get_trainer_from_args(dataset_name_or_id: Union[int, str],
                           fold: int,
                           trainer_name: str = 'nnUNetTrainer',
                           plans_identifier: str = 'nnUNetPlans',
-                          device: torch.device = torch.device('cuda'),
-                          return_data_loader: bool = False):
+                          device: torch.device = torch.device('cuda')):
     # load nnunet class and do sanity checks
     nnunet_trainer = recursive_find_python_class(join(nnunetv2.__path__[0], "training", "nnUNetTrainer"),
                                                 trainer_name, 'nnunetv2.training.nnUNetTrainer')
@@ -64,7 +63,7 @@ def get_trainer_from_args(dataset_name_or_id: Union[int, str],
     plans = load_json(plans_file)
     dataset_json = load_json(join(preprocessed_dataset_folder_base, 'dataset.json'))
     nnunet_trainer = nnunet_trainer(plans=plans, configuration=configuration, fold=fold,
-                                    dataset_json=dataset_json, device=device, return_data_loader=return_data_loader)
+                                    dataset_json=dataset_json, device=device)
     return nnunet_trainer
 
 
@@ -98,6 +97,39 @@ def maybe_load_checkpoint(nnunet_trainer: nnUNetTrainer, continue_training: bool
     if expected_checkpoint_file is not None:
         nnunet_trainer.load_checkpoint(expected_checkpoint_file)
 
+
+
+def my_maybe_load_checkpoint(nnunet_trainer: nnUNetTrainer, continue_training: bool, validation_only: bool,
+                          pretrained_weights_file: str = None):
+    if continue_training and pretrained_weights_file is not None:
+        raise RuntimeError('Cannot both continue a training AND load pretrained weights. Pretrained weights can only '
+                           'be used at the beginning of the training.')
+    if continue_training:
+        expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_final.pth')
+        if not isfile(expected_checkpoint_file):
+            expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_latest.pth')
+        # special case where --c is used to run a previously aborted validation
+        if not isfile(expected_checkpoint_file):
+            expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_best.pth')
+        if not isfile(expected_checkpoint_file):
+            print(f"WARNING: Cannot continue training because there seems to be no checkpoint available to "
+                               f"continue from. Starting a new training...")
+            expected_checkpoint_file = None
+    elif validation_only:
+        expected_checkpoint_file = join(nnunet_trainer.output_folder, 'checkpoint_final.pth')
+        if not isfile(expected_checkpoint_file):
+            raise RuntimeError(f"Cannot run validation because the training is not finished yet!")
+    else:
+        if pretrained_weights_file is not None:
+            if not nnunet_trainer.was_initialized:
+                nnunet_trainer.initialize()
+            load_pretrained_weights(nnunet_trainer.network, pretrained_weights_file, verbose=True)
+        expected_checkpoint_file = None
+
+    if expected_checkpoint_file is not None:
+        checkpoint = nnunet_trainer.my_return_checkpoint(expected_checkpoint_file)
+        return checkpoint
+        
 
 def setup_ddp(rank, world_size):
     # initialize the process group
@@ -148,7 +180,8 @@ def run_training(dataset_name_or_id: Union[str, int],
                  val_with_best: bool = False,
                  device: torch.device = torch.device('cuda'),
                  return_trainer: bool = False,
-                 return_data_loader: bool = False):
+                 return_data_loader: bool = False,
+                 return_checkpoint: bool = False):
     if plans_identifier == 'nnUNetPlans':
         print("\n############################\n"
               "INFO: You are using the old nnU-Net default plans. We have updated our recommendations. "
@@ -193,7 +226,11 @@ def run_training(dataset_name_or_id: Union[str, int],
                  join=True)
     else:
         nnunet_trainer = get_trainer_from_args(dataset_name_or_id, configuration, fold, trainer_class_name,
-                                               plans_identifier, device=device, return_data_loader=return_data_loader)
+                                               plans_identifier, device=device)
+        
+        if return_data_loader:
+            dataloader_train, dataloader_val = nnunet_trainer.get_data_loader()
+            return dataloader_train, dataloader_val
 
         if disable_checkpointing:
             nnunet_trainer.disable_checkpointing = disable_checkpointing
@@ -202,12 +239,17 @@ def run_training(dataset_name_or_id: Union[str, int],
         
         if return_trainer:
             return nnunet_trainer
+        
+        if return_checkpoint:
+            checkpoint = my_maybe_load_checkpoint(nnunet_trainer, continue_training, only_run_validation, pretrained_weights)
+            return checkpoint
 
         maybe_load_checkpoint(nnunet_trainer, continue_training, only_run_validation, pretrained_weights)
 
         if torch.cuda.is_available():
             cudnn.deterministic = False
             cudnn.benchmark = True
+
 
         if not only_run_validation:
             nnunet_trainer.run_training()
@@ -273,7 +315,7 @@ def run_training_entry():
                  args.num_gpus, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
                  device=device)
 
-def get_train_loader(fold = 0):
+def get_weights(fold = 0):
     import argparse
     arg_dict = {
         'dataset_name_or_id': '4',
@@ -284,13 +326,14 @@ def get_train_loader(fold = 0):
         'pretrained_weights': None,
         'num_gpus': 1,
         'npz': "",
-        'c': "",
+        'c': True,
         'val': "",
         'disable_checkpointing': "",
         'val_best': "",
         'device': 'cuda',
         'return_trainer': False,
-        'return_data_loader': True
+        'return_data_loader': False,
+        'return_checkpoint': True
     }
     from argparse import Namespace
     args = Namespace(**arg_dict)
@@ -310,7 +353,7 @@ def get_train_loader(fold = 0):
 
     return run_training(args.dataset_name_or_id, args.configuration, args.fold, args.tr, args.p, args.pretrained_weights,
                  args.num_gpus, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
-                 device=device, return_trainer=args.return_trainer, return_data_loader=args.return_data_loader)
+                 device=device, return_trainer=args.return_trainer, return_data_loader=args.return_data_loader, return_checkpoint=args.return_checkpoint)
 
 if __name__ == '__main__':
     os.environ['OMP_NUM_THREADS'] = '1'
@@ -321,10 +364,5 @@ if __name__ == '__main__':
     os.environ['nnUNet_preprocessed'] = "/home/awias/data/nnUNet/nnUNet_preprocessed"
     os.environ['nnUNet_results'] = "/home/awias/data/nnUNet/nnUNet_results"
 
-    # reduces the number of threads used for compiling. More threads don't help and can cause problems
     
-    # os.environ['TORCHINDUCTOR_COMPILE_THREADS'] = 1
-    # multiprocessing.set_start_method("spawn")
-    
-    get_train_loader()
-
+    dataloader_train, dataloader_val = get_weights()

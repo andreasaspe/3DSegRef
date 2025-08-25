@@ -34,8 +34,7 @@ def get_trainer_from_args(dataset_name_or_id: Union[int, str],
                           fold: int,
                           trainer_name: str = 'nnUNetTrainer',
                           plans_identifier: str = 'nnUNetPlans',
-                          device: torch.device = torch.device('cuda'),
-                          return_data_loader: bool = False):
+                          device: torch.device = torch.device('cuda')):
     # load nnunet class and do sanity checks
     nnunet_trainer = recursive_find_python_class(join(nnunetv2.__path__[0], "training", "nnUNetTrainer"),
                                                 trainer_name, 'nnunetv2.training.nnUNetTrainer')
@@ -64,7 +63,7 @@ def get_trainer_from_args(dataset_name_or_id: Union[int, str],
     plans = load_json(plans_file)
     dataset_json = load_json(join(preprocessed_dataset_folder_base, 'dataset.json'))
     nnunet_trainer = nnunet_trainer(plans=plans, configuration=configuration, fold=fold,
-                                    dataset_json=dataset_json, device=device, return_data_loader=return_data_loader)
+                                    dataset_json=dataset_json, device=device)
     return nnunet_trainer
 
 
@@ -193,7 +192,11 @@ def run_training(dataset_name_or_id: Union[str, int],
                  join=True)
     else:
         nnunet_trainer = get_trainer_from_args(dataset_name_or_id, configuration, fold, trainer_class_name,
-                                               plans_identifier, device=device, return_data_loader=return_data_loader)
+                                               plans_identifier, device=device)
+        
+        if return_data_loader:
+            dataloader_train, dataloader_val = nnunet_trainer.get_data_loader()
+            return dataloader_train, dataloader_val
 
         if disable_checkpointing:
             nnunet_trainer.disable_checkpointing = disable_checkpointing
@@ -208,6 +211,7 @@ def run_training(dataset_name_or_id: Union[str, int],
         if torch.cuda.is_available():
             cudnn.deterministic = False
             cudnn.benchmark = True
+
 
         if not only_run_validation:
             nnunet_trainer.run_training()
@@ -273,7 +277,7 @@ def run_training_entry():
                  args.num_gpus, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
                  device=device)
 
-def get_train_loader(fold = 0):
+def get_data_loader(fold = 0):
     import argparse
     arg_dict = {
         'dataset_name_or_id': '4',
@@ -321,11 +325,40 @@ if __name__ == '__main__':
     os.environ['nnUNet_preprocessed'] = "/home/awias/data/nnUNet/nnUNet_preprocessed"
     os.environ['nnUNet_results'] = "/home/awias/data/nnUNet/nnUNet_results"
 
-    # reduces the number of threads used for compiling. More threads don't help and can cause problems
     
-    # os.environ['TORCHINDUCTOR_COMPILE_THREADS'] = 1
-    # multiprocessing.set_start_method("spawn")
-    
-    
-    get_train_loader()
+    dataloader_train, dataloader_val = get_data_loader()
 
+    
+    # FOR PLOTTING? 
+    
+    # import matplotlib.pyplot as plt
+
+    # for i, batch in enumerate(dataloader_train):
+    #     print("Batch keys:", batch.keys())   # <-- see available items
+    #     print(f"Processing batch {i}")
+    #     data = batch['data']         # shape: (B, C, *patch_size)
+    #     target = batch['target'][0] #Target is actually of len 5 (one per supervision scale). ChatGPT says nnU-Net prepares multiple downsampled versions of the segmentation for the different decoder outputs.
+    #     # seg = batch['seg']           # shape: (B, 1, *patch_size)
+    #     print(i, data.shape, target.shape)
+        
+
+    #     # Convert to numpy array
+    #     data_np = data.cpu().numpy()
+    #     target_np = target.cpu().numpy()
+
+    #     # Plot the first slice of the first sample in the batch
+    #     fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+
+    #     # Plot data
+    #     axs[0].imshow(data_np[0, 0, :, :, data_np.shape[-1] // 2], cmap='gray')
+    #     axs[0].set_title(f'Batch {i} - Sample 0 - Data (Middle Slice)')
+    #     axs[0].axis('off')
+
+    #     # Plot target
+    #     axs[1].imshow(target_np[0, 0, :, :, target_np.shape[-1] // 2], cmap='jet')
+    #     axs[1].set_title(f'Batch {i} - Sample 0 - Target (Middle Slice)')
+    #     axs[1].axis('off')
+
+    #     plt.tight_layout()
+    #     plt.savefig(f'batch_{i}_sample_0_middle_slice.png')
+    #     plt.close()
