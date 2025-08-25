@@ -43,7 +43,7 @@ def reorient_to(img, axcodes_to=('P', 'I', 'R'), verb=False):
 
 # Directories titans
 base_dir = "/scratch/awias/data/Totalsegmentator_dataset_v201"
-savepath_root = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_liver"
+savepath_root = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
 
 os.makedirs(savepath_root, exist_ok=True)
 
@@ -56,7 +56,7 @@ idx = 0
 
 for subj in tqdm(subjects):
     ct_path = os.path.join(base_dir, subj, "ct.nii.gz")
-    seg_path = os.path.join(base_dir, subj, "segmentations", "liver.nii.gz")
+    seg_path = os.path.join(base_dir, subj, "segmentations", "pancreas.nii.gz")
 
     seg_nib = nib.load(seg_path)
     seg_arr = seg_nib.get_fdata(dtype=np.float32)
@@ -95,7 +95,7 @@ for subj in tqdm(subjects):
     seg_nib_reoriented = reorient_to(new_seg, axcodes_to=new_orientation)
 
     savepath_img = os.path.join(savepath_root, f"{subj}_img.nii.gz")
-    savepath_seg = os.path.join(savepath_root, f"{subj}_liver.nii.gz")
+    savepath_seg = os.path.join(savepath_root, f"{subj}_seg.nii.gz")
 
     nib.save(img_nib_reoriented, savepath_img)
     nib.save(seg_nib_reoriented, savepath_seg)

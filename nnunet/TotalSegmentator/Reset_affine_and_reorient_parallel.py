@@ -42,7 +42,7 @@ def process_subject(subj, base_dir, savepath_root, new_orientation=('L','A','S')
     """Process a single subject - this function will be parallelized"""
     try:
         ct_path = os.path.join(base_dir, subj, "ct.nii.gz")
-        seg_path = os.path.join(base_dir, subj, "segmentations", "liver.nii.gz")
+        seg_path = os.path.join(base_dir, subj, "segmentations", "pancreas.nii.gz")
 
         # Check if files exist
         if not os.path.exists(ct_path) or not os.path.exists(seg_path):
@@ -81,7 +81,7 @@ def process_subject(subj, base_dir, savepath_root, new_orientation=('L','A','S')
         seg_nib_reoriented = reorient_to(new_seg, axcodes_to=new_orientation)
 
         savepath_img = os.path.join(savepath_root, f"{subj}_img.nii.gz")
-        savepath_seg = os.path.join(savepath_root, f"{subj}_liver.nii.gz")
+        savepath_seg = os.path.join(savepath_root, f"{subj}_msk.nii.gz")
 
         nib.save(img_nib_reoriented, savepath_img)
         nib.save(seg_nib_reoriented, savepath_seg)
@@ -99,7 +99,7 @@ def main():
 
     # Directories titans
     base_dir = "/scratch/awias/data/Totalsegmentator_dataset_v201"
-    savepath_root = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_liver"
+    savepath_root = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
 
     os.makedirs(savepath_root, exist_ok=True)
 
