@@ -3,9 +3,9 @@ from sklearn.model_selection import train_test_split
 import shutil
 from tqdm import tqdm
 
-data_folder = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_liver"
+data_folder = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
 
-dataset_name_and_id = "Dataset003_TotalSegmentatorLiver"
+dataset_name_and_id = "Dataset004_TotalSegmentatorPancreas"
 
 output_image_tr_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/imagesTr"
 output_label_tr_path = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}/labelsTr"
@@ -29,7 +29,7 @@ os.makedirs(output_label_ts_path, exist_ok=True)
 def copy_files(subjects, image_dest, label_dest):
     for subject in tqdm(subjects):
         image_src = os.path.join(data_folder, f"{subject}_img.nii.gz")
-        label_src = os.path.join(data_folder, f"{subject}_liver.nii.gz")
+        label_src = os.path.join(data_folder, f"{subject}_msk.nii.gz")
         subject_number = str(int(subject[1:]))
         image_dst = os.path.join(image_dest, f"{subject_number}_0000.nii.gz")
         label_dst = os.path.join(label_dest, f"{subject_number}.nii.gz")
