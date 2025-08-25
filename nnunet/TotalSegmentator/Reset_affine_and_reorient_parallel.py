@@ -94,12 +94,12 @@ def process_subject(subj, base_dir, savepath_root, new_orientation=('L','A','S')
 
 def main():
     # Directories ubuntu
-    # base_dir = "/home/awias/data/Totalsegmentator_dataset_v201"
-    # savepath_root = "/home/awias/data/Totalsegmentator_dataset_v201_filtered_liver"
+    base_dir = "/home/awias/data/Totalsegmentator_dataset_v201"
+    savepath_root = "/home/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
 
     # Directories titans
-    base_dir = "/scratch/awias/data/Totalsegmentator_dataset_v201"
-    savepath_root = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
+    # base_dir = "/scratch/awias/data/Totalsegmentator_dataset_v201"
+    # savepath_root = "/scratch/awias/data/Totalsegmentator_dataset_v201_filtered_pancreas"
 
     os.makedirs(savepath_root, exist_ok=True)
 
