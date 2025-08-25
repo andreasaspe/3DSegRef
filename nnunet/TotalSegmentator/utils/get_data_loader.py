@@ -195,7 +195,7 @@ def run_training(dataset_name_or_id: Union[str, int],
                                                plans_identifier, device=device)
         
         if return_data_loader:
-            dataloader_train, dataloader_val = nnunet_trainer.get_data_loader()
+            dataloader_train, dataloader_val = nnunet_trainer.get_dataloaders()
             return dataloader_train, dataloader_val
 
         if disable_checkpointing:
@@ -321,9 +321,9 @@ if __name__ == '__main__':
     os.environ['MKL_NUM_THREADS'] = '1'
     os.environ['OPENBLAS_NUM_THREADS'] = '1'
 
-    os.environ['nnUNet_raw'] = "/home/awias/data/nnUNet/nnUNet_raw"
-    os.environ['nnUNet_preprocessed'] = "/home/awias/data/nnUNet/nnUNet_preprocessed"
-    os.environ['nnUNet_results'] = "/home/awias/data/nnUNet/nnUNet_results"
+    # os.environ['nnUNet_raw'] = "/home/awias/data/nnUNet/nnUNet_raw"
+    # os.environ['nnUNet_preprocessed'] = "/home/awias/data/nnUNet/nnUNet_preprocessed"
+    # os.environ['nnUNet_results'] = "/home/awias/data/nnUNet/nnUNet_results"
 
     
     dataloader_train, dataloader_val = get_data_loader()
@@ -331,34 +331,34 @@ if __name__ == '__main__':
     
     # FOR PLOTTING? 
     
-    # import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt
 
-    # for i, batch in enumerate(dataloader_train):
-    #     print("Batch keys:", batch.keys())   # <-- see available items
-    #     print(f"Processing batch {i}")
-    #     data = batch['data']         # shape: (B, C, *patch_size)
-    #     target = batch['target'][0] #Target is actually of len 5 (one per supervision scale). ChatGPT says nnU-Net prepares multiple downsampled versions of the segmentation for the different decoder outputs.
-    #     # seg = batch['seg']           # shape: (B, 1, *patch_size)
-    #     print(i, data.shape, target.shape)
+    for i, batch in enumerate(dataloader_train):
+        print("Batch keys:", batch.keys())   # <-- see available items
+        print(f"Processing batch {i}")
+        data = batch['data']        
+        target = batch['target'][0] #Target is actually of len 5 (one per supervision scale). ChatGPT says nnU-Net prepares multiple downsampled versions of the segmentation for the different decoder outputs.
+        # seg = batch['seg']         
+        print(i, data.shape, target.shape)
         
 
-    #     # Convert to numpy array
-    #     data_np = data.cpu().numpy()
-    #     target_np = target.cpu().numpy()
+        # Convert to numpy array
+        data_np = data.cpu().numpy()
+        target_np = target.cpu().numpy()
 
-    #     # Plot the first slice of the first sample in the batch
-    #     fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+        # Plot the first slice of the first sample in the batch
+        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
 
-    #     # Plot data
-    #     axs[0].imshow(data_np[0, 0, :, :, data_np.shape[-1] // 2], cmap='gray')
-    #     axs[0].set_title(f'Batch {i} - Sample 0 - Data (Middle Slice)')
-    #     axs[0].axis('off')
+        # Plot data
+        axs[0].imshow(data_np[0, 0, :, :, data_np.shape[-1] // 2], cmap='gray')
+        axs[0].set_title(f'Batch {i} - Sample 0 - Data (Middle Slice)')
+        axs[0].axis('off')
 
-    #     # Plot target
-    #     axs[1].imshow(target_np[0, 0, :, :, target_np.shape[-1] // 2], cmap='jet')
-    #     axs[1].set_title(f'Batch {i} - Sample 0 - Target (Middle Slice)')
-    #     axs[1].axis('off')
+        # Plot target
+        axs[1].imshow(target_np[0, 0, :, :, target_np.shape[-1] // 2], cmap='jet')
+        axs[1].set_title(f'Batch {i} - Sample 0 - Target (Middle Slice)')
+        axs[1].axis('off')
 
-    #     plt.tight_layout()
-    #     plt.savefig(f'batch_{i}_sample_0_middle_slice.png')
-    #     plt.close()
+        plt.tight_layout()
+        plt.savefig(f'batch_{i}_sample_0_middle_slice.png')
+        plt.close()

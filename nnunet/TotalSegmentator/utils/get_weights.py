@@ -229,7 +229,7 @@ def run_training(dataset_name_or_id: Union[str, int],
                                                plans_identifier, device=device)
         
         if return_data_loader:
-            dataloader_train, dataloader_val = nnunet_trainer.get_data_loader()
+            dataloader_train, dataloader_val = nnunet_trainer.get_dataloaders()
             return dataloader_train, dataloader_val
 
         if disable_checkpointing:
@@ -365,4 +365,4 @@ if __name__ == '__main__':
     os.environ['nnUNet_results'] = "/home/awias/data/nnUNet/nnUNet_results"
 
     
-    dataloader_train, dataloader_val = get_weights()
+    checkpoint = get_weights()
