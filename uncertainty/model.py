@@ -5,8 +5,7 @@ import torch
 import os
 import numpy as np
 import torch.nn.functional as F
-from attr.converters import optional
-from pandocfilters import attributes
+
 from torch.nn.modules.dropout import _DropoutNd
 from torch.nn.modules.conv import _ConvNd
 from dynamic_network_architectures.architectures import unet
@@ -86,11 +85,11 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         n_conv_per_stage_decoder: Union[int, Tuple[int, ...], List[int]],
         conv_bias: bool = False,
         norm_op: Union[None, Type[nn.Module]] = None,
-        norm_op_kwargs: dict = None,
+        norm_op_kwargs: Union[None, dict] = None,
         dropout_op: Union[None, Type[_DropoutNd]] = None,
-        dropout_op_kwargs: dict = None,
+        dropout_op_kwargs: Union[None, dict] = None,
         nonlin: Union[None, Type[torch.nn.Module]] = None,
-        nonlin_kwargs: dict = None,
+        nonlin_kwargs: Union[None, dict] = None,
         deep_supervision: bool = False,
         block: Union[Type[BasicBlockD], Type[BottleneckD]] = BasicBlockD,
         bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
@@ -142,35 +141,136 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             disable_default_stem=False,
             stem_channels=stem_channels,
         )
+
         self.decoder = UnetDecoderWithUncertainty(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision, cov_rank=cov_rank, num_samples=num_samples)
+        B_init = torch.randn(num_classes, cov_rank) * 0.02 if cov_rank > 0 else torch.zeros(num_classes, 0)
+        self.cov_basis_mat = nn.Parameter(B_init, requires_grad=(cov_rank > 0))
 
         self.loss_fn = VariationalLoss(**loss_kwargs)
         self.num_samples = num_samples
         self.return_samples = return_samples
         self.cov_rank = cov_rank
+        self.min_logvar, self.max_logvar = -5, 5
+        self.evaluate_with_samples = True
 
-    def forward(self, x, targets = None):
+    def forward(self, x, targets = None, reduction = "none"):
 
         skips = self.encoder(x)
-        mu, diag_var_out, cov_out = self.decoder(skips)
+        mu, log_var_diag, cov_out = self.decoder(skips)
 
+        diag_var_out = torch.exp(0.5 * torch.clamp(log_var_diag, self.min_logvar, self.max_logvar))
         if self.decoder.deep_supervision:
             mu = mu[0]
 
         logits = None
         loss, loss_attributes = None, None
-        if self.return_samples:
-            mu, loss, loss_attributes = self.sample_logits(
-                mu, cov_out, diag_var_out,num_samples = self.num_samples, targets=targets
+        if self.return_samples and self.evaluate_with_samples:
+            logits_mc = self.sample_logits(
+                mu, cov_out, diag_var_out, self.cov_basis_mat, num_samples=self.num_samples
             )
+
+            if targets is not None:
+                is_sampled = True
+                if reduction == 'mean':
+                    logits_mc = logits_mc.mean(0)
+                    is_sampled = False
+                
+                loss, loss_attributes = self.calculate_loss(targets, logits_mc, diag_var_out, is_sampled=is_sampled)
         else:
             if targets is not None:
-                loss, loss_attributes = self.loss_fn(targets, mu, diag_var_out)
+                loss, loss_attributes = self.calculate_loss(targets, mu, diag_var_out, is_sampled=False)
 
         output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
         return output
+    
+    def basis_model_only(self, only = True):
+        self.evaluate_with_samples = not only
 
-    def sample_logits(self, mu, a, sigma, num_samples: int, targets=None):
+    
+    def calculate_loss(self, targets, logits_mc, sigma, is_sampled = True):
+        
+        loss, loss_attributes = 0., {}
+        if not is_sampled:
+            comb_loss, loss_attributes = self.loss_fn(logits_mc, targets, torch.log(sigma))
+            return comb_loss, loss_attributes
+    
+        for idx in range(self.num_samples):
+            if idx == 0:
+                comb_loss, sample_attributes = self.loss_fn(logits_mc[idx], targets, torch.log(sigma))
+                loss_attributes = {key: 0 for key in sample_attributes.keys()}
+            else:
+                comb_loss, sample_attributes = self.loss_fn(logits_mc[idx], targets)  # Only KL loss once
+
+            loss += comb_loss
+            loss_attributes = {key: val + sample_attributes[key] for key, val in loss_attributes.items()}
+    
+        return loss, loss_attributes
+
+    
+    def sample_logits(self, mu, a, sigma, B, num_samples):
+        """
+        Sample MC logits from a Gaussian with low-rank + diagonal covariance.
+
+        Distribution:
+            logits ~ N(mu, Σ), with
+            Σ = (B diag(a))(B diag(a))^T + diag(sigma^2)
+
+        Args:
+            mu:    [B,C,D,H,W]   mean logits
+            a:     [B,r,D,H,W]   low-rank scales (voxel dependent)
+            sigma: [B,C,D,H,W]   diagonal std dev
+            B:     [C,r]         learned basis matrix (shared across voxels/batch)
+            num_samples: int     number of Monte Carlo samples
+            targets: [B,D,H,W]   (optional) target labels, unused here but kept for API compatibility
+
+        Returns:
+            logits_mc: [K,B,C,D,H,W]   sampled logits
+        """
+        Bsz, C, D, H, W = mu.shape
+        r = a.shape[1]  # rank
+
+        # -------------------------------------------------------
+        # 1. Expand mean for sampling
+        # -------------------------------------------------------
+        mu_exp = mu.unsqueeze(0).expand(num_samples, -1, -1, -1, -1, -1)  # [K,B,C,D,H,W]
+
+        # -------------------------------------------------------
+        # 2. Low-rank noise component
+        # -------------------------------------------------------
+        # eps_r ~ N(0, I), shape [K,B,r,D,H,W]
+        eps_r = torch.randn(num_samples, Bsz, r, D, H, W, device=mu.device, dtype=mu.dtype)
+
+        # Scale by 'a': [K,B,r,D,H,W]
+        scaled = eps_r * a.unsqueeze(0)
+
+        # Reshape to [K,B,r,N] with N = D*H*W
+        N = D * H * W
+        scaled = scaled.view(num_samples, Bsz, r, N)
+
+        # Project into C with B:
+        #   B: [C,r], scaled: [K,B,r,N]
+        #   result: [K,B,C,N]
+        low_rank = torch.matmul(B, scaled)  
+
+        # Reshape back to [K,B,C,D,H,W]
+        low_rank_noise = low_rank.view(num_samples, Bsz, C, D, H, W)
+
+        # -------------------------------------------------------
+        # 3. Diagonal noise component
+        # -------------------------------------------------------
+        eps_diag = torch.randn(num_samples, Bsz, C, D, H, W, device=mu.device, dtype=mu.dtype)
+        diag_noise = eps_diag * sigma.unsqueeze(0)
+
+        # -------------------------------------------------------
+        # 4. Combine all parts
+        # -------------------------------------------------------
+        logits_mc = mu_exp + low_rank_noise + diag_noise
+        return logits_mc
+    
+
+    
+    
+    def sample_logits_old(self, mu, a, log_var, num_samples: int, targets=None):
         """
         Sample logits ~ N(mu, Σ), Σ = (B diag(a))(B diag(a))^T + diag(σ^2)
         Shapes:
@@ -190,6 +290,7 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         device = mu.device
         dtype = mu.dtype
 
+        sigma = torch.exp(0.5 * log_var)
         eps = torch.randn(num_samples, Bsz, C, D, H, W, device=device, dtype=dtype)
         diagpart = sigma.unsqueeze(0) * eps
 
@@ -202,19 +303,20 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         else:
             logits = mu.unsqueeze(0) + diagpart
 
-        loss, attributes = 0., {}
+
+        loss, loss_attributes = 0., {}
         if targets is not None:
             for idx in range(num_samples):
                 if idx == 0:
-                    comb_loss, sample_attributes = self.loss_fn(logits[idx], targets, sigma)
-                    attributes = {key: 0 for key in sample_attributes.keys()}
+                    comb_loss, sample_attributes = self.loss_fn(logits[idx], targets, torch.log(sigma))
+                    loss_attributes = {key: 0 for key in sample_attributes.keys()}
                 else:
                     comb_loss, sample_attributes = self.loss_fn(logits[idx], targets)  # Only KL loss once
 
                 loss += comb_loss
-                attributes = {key: val + sample_attributes[key] for key, val in attributes.items()}
-
-        return logits, loss, attributes
+                loss_attributes = {key: val + sample_attributes[key] for key, val in loss_attributes.items()}
+        
+        return logits, loss, loss_attributes
 
 
 class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
@@ -226,12 +328,12 @@ class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
                  deep_supervision,
                  nonlin_first: bool = False,
                  norm_op: Union[None, Type[nn.Module]] = None,
-                 norm_op_kwargs: dict = None,
+                 norm_op_kwargs: Union[None, dict] = None,
                  dropout_op: Union[None, Type[_DropoutNd]] = None,
-                 dropout_op_kwargs: dict = None,
+                 dropout_op_kwargs: Union[None, dict] = None,
                  nonlin: Union[None, Type[torch.nn.Module]] = None,
-                 nonlin_kwargs: dict = None,
-                 conv_bias: bool = None,
+                 nonlin_kwargs: Union[None, dict] = None,
+                 conv_bias: Union[None, bool] = None,
                  cov_rank: int = 16,
                  num_samples: int = 5,
                  **loss_kwargs
@@ -240,8 +342,7 @@ class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
         super().__init__(encoder, num_classes, n_conv_per_stage, deep_supervision, nonlin_first, norm_op, norm_op_kwargs, dropout_op, dropout_op_kwargs, nonlin, nonlin_kwargs, conv_bias)
 
         self.cov_rank = cov_rank
-        B_init = torch.randn(num_classes, cov_rank) * 0.02 if cov_rank > 0 else torch.zeros(num_classes, 0)
-        self.cov_basis_mat = nn.Parameter(B_init, requires_grad=(cov_rank > 0))
+        
 
         self.output_stage_meta_diag = {
             'in_channels': self.seg_layers[-1].in_channels,
@@ -261,7 +362,7 @@ class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
         self.num_samples = num_samples
 
 
-    def forward(self, skips, targets = None):
+    def forward(self, skips):
         """
         we expect to get the skips in the order they were computed, so the bottleneck should be the last entry
         :param skips:
@@ -394,10 +495,10 @@ class VariationalLoss(nn.Module):
 
         ce_loss = self.ce_forward(logits, target)
         dice_loss = self.dice_loss(F.softmax(logits, dim = 1), target, num_classes = 2)
-        kl_loss = 0 if log_var is None else self.kl_loss(log_var, self.num_total)
+        kl_loss = torch.zeros_like(ce_loss) if log_var is None else self.kl_loss(log_var, self.num_total)
 
         loss = self.lambda_ce * ce_loss + self.lambda_dice * dice_loss + self.lambda_kl * kl_loss
-        return loss, {'cross_entropy': ce_loss.item(), 'dice': dice_loss.item(), 'kl_loss': kl_loss}
+        return loss, {'cross_entropy': ce_loss.item(), 'dice': dice_loss.item(), 'kl_loss': kl_loss.item()}
 
 
     @staticmethod
@@ -408,6 +509,7 @@ class VariationalLoss(nn.Module):
         :param num_total: the total number of samples in training, so to act like a prior
         :return: KL Div
         """
+        num_total = log_var.numel()
         return 0.5 * torch.sum(torch.exp(log_var) - 1 - log_var) / num_total
 
     @staticmethod
@@ -434,12 +536,19 @@ def get_model_from_base_kwargs(path_to_base, **kwargs):
 
 if __name__ == '__main__':
 
-    path_to_base = r"C:\Users\pjtka\Downloads\info_dict.pkl"
+    path_to_base = r"/home/pjtka/ndsegment/NDSegRef/uncertainty/info_dict.pkl"
     model = get_model_from_base_kwargs(path_to_base)
     model = model.to('cuda')
-    data = torch.rand((1, 1, 128, 128, 128))
+    state_dict = torch.load(
+        '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth'
+    ,weights_only=False)
+    own_state_dict = model.state_dict()
+    breakpoint()
+    model.load_state_dict(state_dict, strict=True)
+    
+    data = torch.rand((2, 1, 224, 224, 224))
     # out = model(data.to('cuda'))
-    targets = (torch.randn((1,128,128,128)) > 0).to('cuda').long()
+    targets = (torch.randn((2, 1, 224, 224, 224)) > 0).to('cuda').long()
     out = model(data.to('cuda'), targets)
     breakpoint()
 

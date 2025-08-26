@@ -195,6 +195,7 @@ def run_training(dataset_name_or_id: Union[str, int],
                                                plans_identifier, device=device)
         
         if return_data_loader:
+            nnunet_trainer.batch_size = 1
             dataloader_train, dataloader_val = nnunet_trainer.get_dataloaders()
             return dataloader_train, dataloader_val
 

@@ -1,4 +1,3 @@
-from http.cookiejar import unmatched
 
 import torch
 import torch.nn as nn
@@ -8,12 +7,13 @@ from tqdm import tqdm
 
 from model import UnetWithUncertainty, get_model_from_base_kwargs
 import os
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 import sys
-sys.path.append(r'C:\Users\pjtka\PycharmProjects\ConceptBottleneckP2\3DSegRef\nnunet')
-#from TotalSegmentator.utils.get_data_loader import get_data_loader
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'nnunet'))
+from TotalSegmentator.utils.get_data_loader import get_data_loader
 from uncertainty_eval import NDUncertaintyCalibration
-
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
 
 def dice_score(prediction, target, smooth = 1e-6, reduction = 'None'):
 
@@ -29,10 +29,11 @@ class Trainer(object):
         self.training_kwargs = training_kwargs
 
         self.train_loader, self.eval_loader, self.num_batches_train, self.num_batches_eval = (
-            None, None, None, None
+            None, None, 100, 100
         )
 
         self.output_dir = training_kwargs['output_dir']
+        print(self.output_dir)
         self.prepare_output_dir()
 
         self.model, self.new_modules = self.get_model(**model_kwargs)
@@ -40,7 +41,9 @@ class Trainer(object):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.scaler = None
         self.train_loader, self.eval_loader = self.setup_data()
-
+        self.num_iterations_per_epoch = training_kwargs.get('num_iterations_per_epoch', 250)
+        self.num_val_iterations = training_kwargs.get('num_val_iterations', 50)
+    
     def setup_optimizer(self,):
         """
         Can add potential functionality for different learning rates here
@@ -54,9 +57,6 @@ class Trainer(object):
     def setup_data(self, ):
         self.train_loader, self.eval_loader = get_data_loader()
 
-        self.num_batches_train = len(self.train_loader)
-        self.num_batches_eval = len(self.eval_loader)
-
         return self.train_loader, self.eval_loader
 
     def prepare_output_dir(self, ):
@@ -67,22 +67,39 @@ class Trainer(object):
         model = get_model_from_base_kwargs(**model_kwargs)
         checkpoint_path = model_kwargs.pop('checkpoint_path', "")
         unmatched_modules = None
-        if checkpoint_path:
+        
+        if not checkpoint_path:
             print("Starting from untrained model")
         else:
             print("Starting from checkpoint {}".format(checkpoint_path))
-            unmatched_modules = model.load_state_dict(torch.load(checkpoint_path), strict=False)
+            own_state_dict = model.state_dict()
+            pretrained_state_dict = torch.load(checkpoint_path, weights_only=False)['network_weights']
 
+
+            if any('decoder.encoder' in key for key in own_state_dict.keys()):
+                new_state_dict = {}
+                for key in pretrained_state_dict.keys():
+                    new_key = key
+                    if 'encoder' in key:
+                        new_key = key.replace('encoder', 'decoder.encoder')
+                    new_state_dict[new_key] = pretrained_state_dict[key]
+                
+            else:
+                new_state_dict = pretrained_state_dict
+            
+            unmatched_modules = model.load_state_dict(pretrained_state_dict, strict=False)
+        
+        print(unmatched_modules)
         return model, unmatched_modules
 
     def train_iter(self, input_volume, target):
 
         input_volume = input_volume.to(self.device, non_blocking=True)
-        target = target.to(device, non_blocking=True).long()
+        target = target.to(self.device, non_blocking=True).long()
         self.optimizer.zero_grad(set_to_none=True)
 
-        with autocast(enabled=amp):
-            output = self.model(input_volume, target=target)
+        with autocast(device_type='cuda'):
+            output = self.model(input_volume, targets=target)
 
         self.scaler.scale(output.loss).backward()
         self.scaler.unscale_(self.optimizer)
@@ -92,41 +109,78 @@ class Trainer(object):
 
         return output
 
+    def handle_various_input(self,elem):
+        
+        input_volume, target = elem['data'], elem['target']
+        
+        target = target[0].squeeze(1)
+        if isinstance(input_volume, list):
+            if not all(vol.shape[0] == 1 for vol in input_volume):
+                input_volume = [vol.unsqueeze(0) for vol in input_volume]
+            input_volume = torch.cat(input_volume, dim = 0)
+        
+        if isinstance(target, list):
+            if not all(tar.shape[0] == 1 for tar in target):
+                target = [tar.unsqueeze(0) for tar in target]
+            target = torch.cat(target, dim = 0)
+        
+        return input_volume, target
+
+
     def train_one_epoch(self, epoch, last_performance = None):
 
         self.model.train()
-        self.scaler = GradScaler(enabled=amp)
+        self.scaler = GradScaler(device='cuda')
 
         running_metrics = {}
-        train_loader_bar = tqdm(self.train_loader, desc = f'Training epoch {epoch}, performance: {last_performance}')
-        for input_volume, target in train_loader_bar:
+    
+        train_loader_bar = tqdm(range(self.num_iterations_per_epoch), desc = f'Training epoch {epoch}, performance: {last_performance}')
+        for step in train_loader_bar:
+            elem = next(self.train_loader)
+            input_volume, target = self.handle_various_input(elem)
             output = self.train_iter(input_volume, target)
 
-            for key, val in output.loss_attributes.items():
+            for key, val in output.loss_decomp.items():
                 if key not in running_metrics:
                     running_metrics[key] = []
                 running_metrics[key].append(val)
 
-            train_loader_bar.set_postfix(running_metrics)
+            train_loader_bar.set_postfix({key: sum(val)/len(val) for key, val in running_metrics.items()})
 
     @torch.no_grad()
-    def run_evaluation(self, eval_loader = None):
+    def run_evaluation(self, eval_loader = None, basis_model_only = False):
 
         if eval_loader is None:
             eval_loader = self.eval_loader
 
         self.model.eval()
-        eval_loader_bar = tqdm(eval_loader, desc = 'Running evaluation')
+        num_eval_steps = len(eval_loader.generator._data.identifiers)
+        eval_loader_bar = tqdm(range(num_eval_steps), desc = 'Running evaluation')
 
-        results = []
+        results = {'dice_score': []}
+        
+        if basis_model_only:
+            self.model.basis_model_only()
+        
+        for step in eval_loader_bar:
+            elem = next(eval_loader)
+            input_volume, target = self.handle_various_input(elem)
+            input_volume = input_volume.to(self.device, non_blocking=True)
+            target = target.to(self.device, non_blocking=True).long()
+            output = self.model(input_volume, target, reduction = 'mean')
+            
+            if step == 0:
+                for loss_type in output.loss_decomp.keys():
+                    results[loss_type] = []
+            for loss_type, val in output.loss_decomp.items():
+                    results[loss_type].append(val)
+            
+            dice = dice_score(output.mu, target)
+            results['dice_score'].append(dice)
 
-        for input_volume, target in eval_loader_bar:
-            output = self.model.inference(input_volume)
-            dice = dice_score(output, target)
-            results.append(dice)
+        metrics = {key: sum(val) / len(val) for key, val in results.items()}
 
-        metrics = {'dice': sum(results) / len(results)}
-
+        self.model.basis_model_only(False)
         return metrics
 
 
@@ -136,31 +190,41 @@ class Trainer(object):
 
     def train(self, ):
 
-        performance = {'dice': -1}
+        performance = {'dice_score': -1}
         best_performance = 0
-        for epoch in range(self.training_kwargs['epochs']):
+        self.model.to(self.device)
+        basis_metrics = self.run_evaluation(basis_model_only=True)
+        print(basis_metrics)
+
+        for epoch in range(self.training_kwargs['num_epochs']):
             self.train_one_epoch(epoch, last_performance = performance)
             performance = self.run_evaluation()
-            if performance['dice'] > best_performance:
+            if performance['dice_score'].item() > best_performance:
                 self.save_model(epoch)
+                best_performance = performance['dice_score'].item()
 
 
 if __name__ == '__main__':
 
     model_kwargs = {
-        'checkpoint_path': r"C:\Users\pjtka\Documents\3d_uncertainty\test_loading.pth",
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': dict(),
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl'
     }
 
     training_kwargs = {
         'num_epochs': 10,
         'lr': 1e-4,
         'weight_decay': 1e-4,
-        'output_dir': r'C:\Users\pjtka\Documents\3d_uncertainty'
+        'output_dir': '/scratch/pjtka/ndseg_output',
+        'num_iterations_per_epoch': 250,
+        'num_val_iterations': 130
     }
 
 
     trainer = Trainer(model_kwargs, training_kwargs)
+    trainer.train()
+
     breakpoint()
 
 
