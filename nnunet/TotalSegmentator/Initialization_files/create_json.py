@@ -4,8 +4,8 @@ import os
 import json
 
 # folders containing dataset
-# root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas"
-root = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas"
+root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset012_TotalSegmentatorHumerus_right"
+# root = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas"
 
 images_tr_dir = os.path.join(root,"imagesTr")
 images_ts_dir = os.path.join(root,"imagesTs")
@@ -18,8 +18,8 @@ train_labels = sorted([f for f in os.listdir(labels_tr_dir) if f.endswith(".nii.
 
 # structure of the dataset.json
 dataset = {
-    "name": "Dataset004_TotalSegmentatorPancreas",  # change name
-    "description": "Dataset for pancreas segmentation from TotalSegmentator dataset", #change description
+    "name": "Dataset012_TotalSegmentatorHumerus_right",  # change name
+    "description": "Dataset for humerus right segmentation from TotalSegmentator dataset", #change description
     "reference": "",
     "licence": "",
     "release": "1.0",
@@ -31,7 +31,7 @@ dataset = {
     "file_ending":".nii.gz",
     "labels": {
         "background": "0", #change labels if needed
-        "pancreas": "1"
+        "humerus_right": "1"
     },
     "numTraining": len(train_images),
     "numTest": len(test_images),
