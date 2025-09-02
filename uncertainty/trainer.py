@@ -13,8 +13,14 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 from TotalSegmentator.utils.get_data_loader import get_data_loader
 from uncertainty_eval import NDUncertaintyCalibration
 import warnings
+import pickle
+import numpy as np
+from argparse import ArgumentParser, Namespace
+import ast
+from dataloaders import HackyEvalLoader
 warnings.filterwarnings('ignore', category=UserWarning)
 
+torch.set_num_interop_threads(1)
 def dice_score(prediction, target, smooth = 1e-6, reduction = 'None'):
 
     prediction = prediction.argmax(1)
@@ -22,11 +28,112 @@ def dice_score(prediction, target, smooth = 1e-6, reduction = 'None'):
     out = (2. * intersection + smooth) / (torch.sum(target) + torch.sum(prediction) + smooth)
     return out.detach().cpu()
 
+class Logger:
+    def __init__(self, write_path, experiment_name = ""):
+
+        self.write_path = write_path
+        os.makedirs(write_path, exist_ok=True)
+
+        self.save_path = os.path.join(self.write_path, f"{experiment_name}_results.pkl")
+        self.latest_key = None
+
+    @staticmethod
+    def handle_results_dtype(results):
+        new_results = {}
+        for key, val in results.items():
+            if isinstance(val, torch.Tensor):
+                val = val.detach().cpu().numpy()
+            
+            if isinstance(val, np.ndarray):
+                if np.prod(val.shape) == 1:
+                    val = val.item()
+
+            new_results[key] = val 
+
+        return new_results    
+
+    def write(self, results: dict, key: str):
+        
+        
+        if os.path.isfile(self.save_path):
+            results_pcl = pickle.load(open(self.save_path, 'rb'))
+        else:
+            results_pcl = {}
+        
+        results = self.handle_results_dtype(results)
+        if key not in results_pcl:
+            results_pcl[key] = []
+        results_pcl[key].append(results)
+
+        with open(self.save_path, 'wb') as handle:
+            pickle.dump(results_pcl, handle, protocol = pickle.HIGHEST_PROTOCOL)
+        
+        print("Wrote results to", self.save_path)
+
+class PerformanceKeeper:
+    def __init__(self, performances):
+        self.performances = performances
+    
+    def __add__(self, other):
+        new_performances = {key: val + other.performances[key] for key, val in self.performances.items()}
+        return PerformanceKeeper(new_performances)
+    
+    def __sub__(self, other):
+        new_performances = {key: val - other.performances[key] for key, val in self.performances.items()}
+        return PerformanceKeeper(new_performances)
+    
+    def __mul__(self, scalar):
+        new_performances = {key: val * scalar for key, val in self.performances.items()}
+        return PerformanceKeeper(new_performances)
+
+    def __div__(self, scalar):
+        new_performances = {key: val / scalar for key, val in self.performances.items()}
+        return PerformanceKeeper(new_performances)
+
+    def __truediv__(self, scalar):
+        new_performances = {key: val /scalar for key, val in self.performances.items()}
+        return PerformanceKeeper(new_performances)
+
+    def __repr__(self):
+        return repr(self.performances)
+    
+    def __str__(self):
+        return str(self.performances)
+    
+
+class PerformanceHolder:
+    def __init__(self,):
+
+        self.performances = {}
+
+    def update(self, key, performance):
+        self.performances[key] = PerformanceKeeper(performance)
+    
+    def to_list(self, keys = None):
+        keys = self.performances.keys() if keys is None else keys
+        values = [self.performances[key] for key in keys]
+        return values
+        
+    def mean(self, keys = None):
+        values = self.to_list(keys = keys)
+        mean = values[0]
+        for elem in values[1:]:
+            mean = mean + elem
+        return mean * 1/len(values)
+    
+    def mean_with_other(self, other):
+        combined_keys = set(self.performances.keys()).intersection(set(other.performances.keys()))
+        return self.mean(keys = combined_keys)
+    
+
+        
 class Trainer(object):
     def __init__(self, model_kwargs, training_kwargs):
 
         self.model_kwargs = model_kwargs
         self.training_kwargs = training_kwargs
+        self.model_kwargs['loss_kwargs'] = training_kwargs['loss_kwargs']
+        self.get_eval_loader_from_saved = training_kwargs.get('eval_loader_data_path', "")
 
         self.train_loader, self.eval_loader, self.num_batches_train, self.num_batches_eval = (
             None, None, 100, 100
@@ -43,7 +150,14 @@ class Trainer(object):
         self.train_loader, self.eval_loader = self.setup_data()
         self.num_iterations_per_epoch = training_kwargs.get('num_iterations_per_epoch', 250)
         self.num_val_iterations = training_kwargs.get('num_val_iterations', 50)
-    
+        self.last_saved_model_path = ""
+        
+        self.basis_model_results_keeper = None
+        self.trained_models_results_keeper = None
+        self.last_performance_diff = None
+        self.gradient_accumulation = self.training_kwargs.get('gradient_accumulation', False)
+
+
     def setup_optimizer(self,):
         """
         Can add potential functionality for different learning rates here
@@ -57,15 +171,18 @@ class Trainer(object):
     def setup_data(self, ):
         self.train_loader, self.eval_loader = get_data_loader()
 
+        if self.get_eval_loader_from_saved:
+            self.eval_loader = HackyEvalLoader(self.get_eval_loader_from_saved)
+
         return self.train_loader, self.eval_loader
 
     def prepare_output_dir(self, ):
         os.makedirs(self.output_dir, exist_ok=True)
 
     def get_model(self, **model_kwargs):
-
-        model = get_model_from_base_kwargs(**model_kwargs)
         checkpoint_path = model_kwargs.pop('checkpoint_path', "")
+        
+        model = get_model_from_base_kwargs(**model_kwargs)
         unmatched_modules = None
         
         if not checkpoint_path:
@@ -74,7 +191,6 @@ class Trainer(object):
             print("Starting from checkpoint {}".format(checkpoint_path))
             own_state_dict = model.state_dict()
             pretrained_state_dict = torch.load(checkpoint_path, weights_only=False)['network_weights']
-
 
             if any('decoder.encoder' in key for key in own_state_dict.keys()):
                 new_state_dict = {}
@@ -98,10 +214,16 @@ class Trainer(object):
         target = target.to(self.device, non_blocking=True).long()
         self.optimizer.zero_grad(set_to_none=True)
 
-        with autocast(device_type='cuda'):
-            output = self.model(input_volume, targets=target)
-
-        self.scaler.scale(output.loss).backward()
+        #with autocast(device_type='cuda'):
+        scaler = None
+        if self.gradient_accumulation:
+            scaler = self.scaler
+        
+        output = self.model(input_volume, targets=target, scaler = scaler)
+        
+        if scaler is None:
+            self.scaler.scale(output.loss).backward()
+        
         self.scaler.unscale_(self.optimizer)
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
         self.scaler.step(self.optimizer)
@@ -134,7 +256,7 @@ class Trainer(object):
 
         running_metrics = {}
     
-        train_loader_bar = tqdm(range(self.num_iterations_per_epoch), desc = f'Training epoch {epoch}, performance: {last_performance}')
+        train_loader_bar = tqdm(range(self.num_iterations_per_epoch), desc = f'Training epoch {epoch}, performance diff: {self.last_performance_diff}')
         for step in train_loader_bar:
             elem = next(self.train_loader)
             input_volume, target = self.handle_various_input(elem)
@@ -145,25 +267,102 @@ class Trainer(object):
                     running_metrics[key] = []
                 running_metrics[key].append(val)
 
-            train_loader_bar.set_postfix({key: sum(val)/len(val) for key, val in running_metrics.items()})
+            train_loader_bar.set_postfix({key: f"{sum(val)/len(val):0.3f}" for key, val in running_metrics.items()})
+        
+        print({key: f"{sum(val)/len(val):0.3f}" for key, val in running_metrics.items()})
+    
+    @torch.no_grad()
+    def run_evaluation_new(self, eval_loader = None, basis_model_only = False):
 
+        if eval_loader is None:
+            eval_loader = self.eval_loader
+
+
+        if not isinstance(eval_loader, HackyEvalLoader):
+            return self.run_evaluation(eval_loader=eval_loader, basis_model_only=basis_model_only)
+    
+        self.model.eval()
+        num_eval_steps = len(eval_loader)
+        eval_loader_bar = tqdm(desc = 'Running evaluation', total = num_eval_steps)
+        performance_holder = PerformanceHolder()
+
+        if basis_model_only:
+            self.model.basis_model_only()
+        
+        ce_forward = nn.CrossEntropyLoss()
+        
+        if hasattr(self.model.decoder, 'cov_weighting_head'):
+            self.model.decoder.cov_weighting_head.track_chosen_indices()
+
+        results = {'dice_score': [], 'cross_entropy_mean': []}
+        for i in range(num_eval_steps):
+            elem = eval_loader[i]
+            input_volume, target = self.handle_various_input(elem)
+            input_volume = input_volume.to(self.device, non_blocking=True)
+            target = target.to(self.device, non_blocking=True).long()
+            output = self.model(input_volume, target, reduction = 'mean')
+
+            if i == 0:
+                for loss_type in output.loss_decomp.keys():
+                    results[loss_type] = []
+            
+            for loss_type, val in output.loss_decomp.items():
+                    results[loss_type].append(val)
+        
+            cross_entropy = ce_forward(output.mu, target)
+            
+            dice = dice_score(output.mu, target)
+            results['dice_score'].append(dice)
+            results['cross_entropy_mean'].append(cross_entropy.item())
+            performance = {key: val[-1] for key, val in results.items()}
+            performance_holder.update(elem['keys'][0].item(), performance)
+            eval_loader_bar.update(1)
+        
+        
+        metrics = {key: sum(val) / len(val) for key, val in results.items()}
+        if hasattr(self.model.decoder, 'cov_weighting_head'):
+            metrics['basis_indices'] = {
+                val: self.model.decoder.cov_weighting_head.chosen_indices.count(val) for val in np.unique(
+                    self.model.decoder.cov_weighting_head.chosen_indices
+                )
+            }
+            self.model.decoder.cov_weighting_head.track_chosen_indices(False)
+        
+            print(metrics['basis_indices'])
+        if basis_model_only:
+            self.basis_model_results_keeper = performance_holder
+        else:
+            self.trained_models_results_keeper = performance_holder
+        self.model.basis_model_only(False)
+        
+        return metrics, performance_holder.mean()
+        
     @torch.no_grad()
     def run_evaluation(self, eval_loader = None, basis_model_only = False):
 
         if eval_loader is None:
             eval_loader = self.eval_loader
 
+        max_iter = 1000
         self.model.eval()
         num_eval_steps = len(eval_loader.generator._data.identifiers)
-        eval_loader_bar = tqdm(range(num_eval_steps), desc = 'Running evaluation')
-
-        results = {'dice_score': []}
+        eval_loader_bar = tqdm(desc = 'Running evaluation', total = len(eval_loader.generator._data.identifiers))
+        performance_holder = PerformanceHolder()
         
+        results = {'dice_score': [], 'cross_entropy_mean': []}
+        ce_forward = nn.CrossEntropyLoss()
         if basis_model_only:
             self.model.basis_model_only()
         
-        for step in eval_loader_bar:
+        has_been_identified = {key: False for key in eval_loader.generator._data.identifiers}
+        wrong_hits_counter = 0
+        step = 0
+        while step < max_iter:
             elem = next(eval_loader)
+            if has_been_identified[elem['keys'][0].item()]:
+                wrong_hits_counter += 1
+                continue
+        
             input_volume, target = self.handle_various_input(elem)
             input_volume = input_volume.to(self.device, non_blocking=True)
             target = target.to(self.device, non_blocking=True).long()
@@ -175,37 +374,88 @@ class Trainer(object):
             for loss_type, val in output.loss_decomp.items():
                     results[loss_type].append(val)
             
+            cross_entropy = ce_forward(output.mu, target)
             dice = dice_score(output.mu, target)
             results['dice_score'].append(dice)
+            results['cross_entropy_mean'].append(cross_entropy.item())
+            performance = {key: val[-1] for key, val in results.items()}
+            performance_holder.update(elem['keys'][0].item(), performance)
+            has_been_identified[elem['keys'][0].item()] = True
 
+            eval_loader_bar.update(1)
+            step += 1
+            if all(has_been_identified.values()):
+                break
+        
+        print("Number of wrong hits by this stupid code was:", wrong_hits_counter)
+        assert len(set(performance_holder.performances.keys()) - set(has_been_identified.keys())) == 0
+        
+     
         metrics = {key: sum(val) / len(val) for key, val in results.items()}
 
+        if basis_model_only:
+            self.basis_model_results_keeper = performance_holder
+        else:
+            self.trained_models_results_keeper = performance_holder
         self.model.basis_model_only(False)
-        return metrics
+        return metrics, performance_holder.mean()
 
 
     def save_model(self, epoch):
-        torch.save(self.model.state_dict(), os.path.join(self.output_dir, 'model_epoch_{}.pth'.format(epoch)))
+
+        model_save_path = os.path.join(self.output_dir, 'model_epoch_{}.pth'.format(epoch))
+        torch.save(self.model.state_dict(), model_save_path)
         print("Saved model to", os.path.join(self.output_dir, 'model_epoch_{}.pth'.format(epoch)))
 
-    def train(self, ):
+        if self.last_saved_model_path:
+            os.remove(self.last_saved_model_path)
+            self.last_saved_model_path = model_save_path
+
+    def finalize(self):
+
+        self.train_loader.__del__()
+
+        if not isinstance(self.eval_loader, HackyEvalLoader):
+            self.eval_loader.__del__()
+
+
+    def train(self, experiment_name = ""):
+
+        logger = Logger(self.output_dir, experiment_name=experiment_name)
 
         performance = {'dice_score': -1}
         best_performance = 0
         self.model.to(self.device)
-        basis_metrics = self.run_evaluation(basis_model_only=True)
+        basis_metrics, mean_perf = self.run_evaluation_new(basis_model_only=True)
+
         print(basis_metrics)
+        print(mean_perf)
+    
+        logger.write(basis_metrics, key = 'init_metrics')
+        logger.write(self.training_kwargs, 'training_kwargs')
 
         for epoch in range(self.training_kwargs['num_epochs']):
             self.train_one_epoch(epoch, last_performance = performance)
-            performance = self.run_evaluation()
+            performance, mean_perf = self.run_evaluation_new()
+            
+            basis_model_performance = self.basis_model_results_keeper.mean_with_other(
+                self.trained_models_results_keeper
+            )
+            trained_model_performance = self.trained_models_results_keeper.mean_with_other(
+                self.basis_model_results_keeper
+            )
+
+            performance_diff = trained_model_performance - basis_model_performance
+            self.last_performance_diff = performance_diff.performances
             if performance['dice_score'].item() > best_performance:
                 self.save_model(epoch)
                 best_performance = performance['dice_score'].item()
+            
+            logger.write(performance_diff.performances, key = 'performance_diff')
+            logger.write(performance, key = 'training_performance')
+        
 
-
-if __name__ == '__main__':
-
+def run_weighting_grid_search(args):
     model_kwargs = {
         'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': dict(),
@@ -217,16 +467,185 @@ if __name__ == '__main__':
         'lr': 1e-4,
         'weight_decay': 1e-4,
         'output_dir': '/scratch/pjtka/ndseg_output',
+        'num_iterations_per_epoch': 250, 
+        'num_val_iterations': 130,
+    }
+
+    base_output_dir = '/scratch/pjtka/ndseg_output/grid_search'
+    ce_values = [0.9, 1.0, 1.1]
+    dice_values = [0.2, 0.5]
+    kl_values = [1e-5, 1e-4, 1e-3]
+
+    for ce in ce_values:
+        for di in dice_values:
+            for kl in kl_values:
+                loss_kwargs = {
+                        'lambda_ce':ce,
+                        'lambda_dice':di,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': kl
+                    }
+
+                training_kwargs['loss_kwargs'] = loss_kwargs
+                experiment_name = 'grid_search_loss'
+                outdir = os.path.join(base_output_dir, f"ce_{ce}_dice_{di}_kl_{kl}")
+                training_kwargs['output_dir'] = outdir
+                run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=experiment_name)
+
+
+def run_experiment(model_kwargs, training_kwargs, experiment_name, num_runs = 1):
+    
+    for i in range(num_runs):
+        trainer = Trainer(model_kwargs=model_kwargs, training_kwargs=training_kwargs)
+        trainer.train(experiment_name=f"{experiment_name}_run_{i}")
+        trainer.finalize()
+
+
+def run_ppt(args):
+    model_kwargs = {
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+        'sample_type': 'torch'
+    }
+
+    training_kwargs = {
+        'num_epochs': 20,
+        'lr': 1e-4,
+        'weight_decay': 1e-4,
+        'output_dir': args.outdir,
         'num_iterations_per_epoch': 250,
-        'num_val_iterations': 130
+        'num_val_iterations': 5,
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        
+        'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+    }
+
+    run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
+    
+
+
+def run_basic(args):
+    model_kwargs = {
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30
+    }
+
+    training_kwargs = {
+        'num_epochs': 20,
+        'lr': 1e-4,
+        'weight_decay': 1e-4,
+        'output_dir': args.outdir,
+        'num_iterations_per_epoch': 250,
+        'num_val_iterations': 5,
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        
+        'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+    }
+
+    run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
+    
+
+def run_multiple_bases(args):
+
+    model_kwargs = {
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 5*1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'model_type': 'weighted_basis',
+        'cov_weighting_kwargs': {
+            'num_bases': 2,
+            'sample_type': 'weighted'
+        },
+        'num_samples_train': 5,
+        'num_samples_inference': 30
+    }
+
+    training_kwargs = {
+        'num_epochs': 20,
+        'lr': 1e-4,
+        'weight_decay': 1e-4,
+        'output_dir': args.outdir,
+        'num_iterations_per_epoch': 250,
+        'num_val_iterations': 5,
+        'loss_kwargs': {
+                        'lambda_ce': 1.0,
+                        'lambda_dice': 1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 5*1e-4
+                    },
+
+        'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+        'gradient_accumulation': False
     }
 
 
-    trainer = Trainer(model_kwargs, training_kwargs)
-    trainer.train()
+    run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
 
-    breakpoint()
 
+if __name__ == '__main__':
+
+    parser = ArgumentParser()
+    parser.add_argument('--exp_type', type = str, default='basic', nargs="+")
+    parser.add_argument('--exp_name', type = str, default='basic', nargs="+")
+    parser.add_argument('--num_runs', type = int, default=1)
+    parser.add_argument('--outdir', type = str, default='/scratch/pjtka/ndseg_output', nargs="+")
+    args = parser.parse_args()
+
+    print(args)
+
+    exp_type_to_func = {
+        'basic': run_basic,
+        'grid': run_weighting_grid_search,
+        'multi_basis': run_multiple_bases,
+        'ppt': run_ppt
+    }
+    assert len(args.exp_type) == len(args.exp_name), 'We require new name for each experiment type otherwise it will overwrite'
+
+    if not isinstance(args.outdir, list):
+        args.outdir = [args.outdir]
+    
+    if len(args.outdir) == 1:
+        args.outdir = args.outdir * len(args.exp_type)
+
+    iterator = zip(args.exp_type, args.exp_name, args.outdir)
+    
+    for exp_type, exp_name, outdir in iterator:
+        run_args = Namespace(**{'exp_type': exp_type, 'exp_name': exp_name, 'outdir': outdir, 'num_runs': args.num_runs})
+        exp_type_to_func[exp_type](run_args)    
+    
+        
+        
 
 
 

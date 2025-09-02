@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Union, Type, List, Tuple, Optional
 from collections import OrderedDict
 from transformers.utils import ModelOutput
-
+from samplers import SamplerWeighted, SamplerUnweighted, ConvexSamplerWeighted
 
 @dataclass
 class UncertaintyModelOutput(ModelOutput):
@@ -30,6 +30,8 @@ class UncertaintyModelOutput(ModelOutput):
     sample_logits: Optional[torch.FloatTensor] = None
     loss: Optional[torch.FloatTensor] = None
     loss_decomp: Optional[dict] = None
+
+
 
 
 class LowRankLogitCovHead3D(nn.Module):
@@ -69,6 +71,90 @@ class LowRankLogitCovHead3D(nn.Module):
         return mu, a, sigma, self.B
 
 
+class CovarianceWeightHead(nn.Module):
+
+    def __init__(self, in_channels, num_bases, use_global_pool = True):
+        super().__init__()
+        """
+        in_channels: number of channels in the input features (from U-Net backbone)
+        num_bases: N, number of global covariance basis matrices
+        use_global_pool: if True, outputs one weight vector per volume; 
+                         if False, outputs one weight vector per voxel
+        """
+
+        super().__init__()
+        self.num_bases = num_bases
+        self.use_global_pool = use_global_pool
+
+        # small convolutional head
+        self.conv1 = nn.Conv3d(in_channels, in_channels // 2, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv3d(in_channels // 2, in_channels // 4, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv3d(in_channels // 4, num_bases, kernel_size=1)  # 
+        
+        self.chosen_indices = []
+    
+    def forward(self, x):
+        h = F.relu(self.conv1(x))
+        h = F.relu(self.conv2(h))
+        logits = self.conv3(h)
+
+        if self.use_global_pool:
+            # global average pooling over spatial dims -> one weight vector per volume
+            logits = logits.mean(dim=(2,3,4))  # (B, N)
+        # else, keep voxel-wise weights: (B, N, D, H, W)
+
+        # softmax to get convex combination weights
+        weights = F.softmax(logits, dim=1)
+        return weights
+    
+
+class CovarianceWeightHeadLight(nn.Module):
+    """
+    Predicts per-volume or per-voxel weights for N covariance bases.
+    Fully convolutional. Maps input channels to N bases, then optionally reduces spatially.
+    """
+    def __init__(self, in_channels, num_bases, use_global_pool=True, top_k = 1):
+        """
+        in_channels: number of channels in the feature map (e.g., 32)
+        num_bases: N covariance bases
+        use_global_pool: True -> one weight vector per volume, False -> voxel-wise
+        """
+        super().__init__()
+        self.num_bases = num_bases
+        self.use_global_pool = use_global_pool
+
+        # channel-wise linear projection
+        self.conv = nn.Conv3d(in_channels, num_bases, kernel_size=1)
+        self.top_k = top_k
+        self.chosen_indices = []
+        self._track_chosen_indices = False
+
+    def track_chosen_indices(self, track = True):
+        self._track_chosen_indices = track
+        self.chosen_indices = []
+    
+    def forward(self, x, tau = 0.9):
+        """
+        x: [B, in_channels, D, H, W]
+        Returns:
+            weights: [B, N] if use_global_pool=True, else [B, N, D, H, W]
+        """
+        logits = self.conv(x)  # [B, N, D, H, W]
+
+        if self.use_global_pool:
+            # global average pooling over spatial dims -> one weight vector per volume
+            logits = logits.mean(dim=(2,3,4))  # [B, N]
+        
+        weights = F.gumbel_softmax(logits, tau, dim=1, hard = True if self.top_k == 1 else False)
+
+        if self._track_chosen_indices:
+            self.chosen_indices.extend(list(torch.argmax(weights, axis = -1).detach().cpu().int()))
+        
+        return weights
+
+class PartitionedCovarianceHead(nn.Module):
+    def __init__(self, in_channels, num_bases, volume_size):
+        
 
 
 class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
@@ -95,12 +181,18 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
         stem_channels: int = None,
         cov_rank: int = 16,
-        num_samples: int = 5,
+        num_samples_train: int = 5,
+        num_samples_inference: int = 30, 
+        sample_type: str = 'ours', 
         return_samples: bool = True,
-        **loss_kwargs
+        loss_kwargs: Union[dict, None] = None,
+        predict_cov_weighting = False,
+        cov_weighting_kwargs = None,
+        **kwargs
     ):
         super().__init__()
 
+    
         self.key_to_encoder = "encoder.stages"
         self.key_to_stem = "encoder.stem"
         self.keys_to_in_proj = ("encoder.stem.convs.0.conv", "encoder.stem.convs.0.all_modules.0")
@@ -142,23 +234,311 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             stem_channels=stem_channels,
         )
 
-        self.decoder = UnetDecoderWithUncertainty(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision, cov_rank=cov_rank, num_samples=num_samples)
+        self.decoder = UnetDecoderWithUncertainty(self.encoder, num_classes, n_conv_per_stage_decoder, deep_supervision, cov_rank=cov_rank, num_samples=num_samples_train, predict_cov_weighting=predict_cov_weighting, cov_weighting_kwargs=cov_weighting_kwargs)
         B_init = torch.randn(num_classes, cov_rank) * 0.02 if cov_rank > 0 else torch.zeros(num_classes, 0)
         self.cov_basis_mat = nn.Parameter(B_init, requires_grad=(cov_rank > 0))
 
+        if loss_kwargs is None:
+            loss_kwargs = {}
+        
+        
         self.loss_fn = VariationalLoss(**loss_kwargs)
-        self.num_samples = num_samples
+        self.num_samples_train = num_samples_train
+        self.num_samples_inference = num_samples_inference
+
         self.return_samples = return_samples
         self.cov_rank = cov_rank
         self.min_logvar, self.max_logvar = -5, 5
         self.evaluate_with_samples = True
+        self.sample_type = sample_type
 
-    def forward(self, x, targets = None, reduction = "none"):
+    def forward(self, x, targets = None, reduction = "none", scaler = None):
 
+        if scaler is not None:
+            output = self.online_sampling_and_loss_gradient_accum(x, targets, scaler)
+            return output
+    
+        skips = self.encoder(x)
+        mu, log_var_diag, cov_out, weighting = self.decoder(skips)
+
+        diag_var_out = torch.exp(0.5 * torch.clamp(log_var_diag, self.min_logvar, self.max_logvar))
+        if self.decoder.deep_supervision:
+            mu = mu[0]
+
+        logits = None
+        loss, loss_attributes = None, None
+
+        if not self.evaluate_with_samples:
+            if targets is not None:
+                loss, loss_attributes = self.loss_fn(mu, targets)
+            return UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
+        
+        num_samples = self.num_samples_train if self.training else self.num_samples_inference
+        if targets is not None:
+            loss, loss_attributes, mu =  self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
+        else:
+            mu = self.online_sampling(mu, cov_out, diag_var_out, num_samples=num_samples)
+            
+        output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
+        return output
+    
+    def online_sampling_and_loss_gradient_accum(self, x, targets, scaler):
+
+        for idx in range(self.num_samples_train):
+            skips = self.encoder(x)
+            mu, log_var_diag, cov_out, weighting = self.decoder(skips)
+
+            diag_var_out = torch.exp(0.5 * torch.clamp(log_var_diag, self.min_logvar, self.max_logvar))
+            if self.decoder.deep_supervision:
+                mu = mu[0]
+            
+            num_samples = 1
+            loss, loss_attributes, prediction = self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out,weighting=weighting, num_samples=num_samples)
+            scaler.scale(loss / self.num_samples_train).backward()
+
+        output = UncertaintyModelOutput(mu, cov_out, diag_var_out, prediction, loss, loss_attributes)
+        return output
+            
+    def basis_model_only(self, only = True):
+        self.evaluate_with_samples = not only
+
+    def online_sampling_and_loss(self, targets, mu, a, sigma, weighting, num_samples, scaler = None):
+        
+        loss, loss_attributes = 0., {}
+
+        distribution = self.get_distribution(mu, a, sigma, self.cov_basis_mat, weighting)
+        prediction = None
+        for idx in range(num_samples):
+            sample = distribution.sample()
+            sample = sample.view(mu.shape)
+            if idx == 0:
+                prediction = sample.detach()
+                
+                if isinstance(distribution, (ConvexSamplerWeighted, )):
+                    comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting=weighting, cov_basis = self.cov_basis_mat)
+                else:
+                    comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting = weighting)
+
+                loss_attributes = {key: 0 for key in sample_attributes.keys()}
+            else:
+                comb_loss, sample_attributes = self.loss_fn(sample, targets)
+                prediction+=sample
+            
+            loss += comb_loss
+            loss_attributes = {key: val + sample_attributes[key] for key, val in loss_attributes.items()}
+
+        loss_attributes = {key: val / num_samples for key, val in loss_attributes.items()}    
+        prediction = prediction / num_samples
+
+        return loss, loss_attributes, prediction
+    
+
+    def get_distribution(self, mu, low_rank, sigma, basis_matrix, weighting):
+        
+        if self.sample_type == 'torch':
+            return self.get_torch_distribution(mu, low_rank, sigma, basis_matrix)
+        
+        elif self.sample_type in ['ours', 'unweighted']:
+            return SamplerUnweighted(mu, sigma, low_rank_cov= low_rank, cov_basis_mat=basis_matrix, weighting=weighting)
+        elif self.sample_type  == 'weighted':
+            return SamplerWeighted(mu, sigma, low_rank_cov= low_rank, cov_basis_mat=basis_matrix, weighting=weighting)
+        elif self.sample_type == 'convex':
+            return ConvexSamplerWeighted(mu, sigma, low_rank_cov= low_rank, cov_basis_mat=basis_matrix, weighting=weighting)
+
+    def online_sampling(self, mu, a, sigma,weighting, num_samples):
+        
+        prediction = torch.zeros_like(mu)
+        distribution = self.get_distribution(mu, a, sigma, self.cov_basis_mat, weighting=weighting)
+        
+        for idx in range(num_samples):
+            prediction += distribution.sample().view(prediction.shape)
+        return prediction / num_samples
+    
+
+    def get_torch_distribution(self, mu, a, sigma, B):
+        batch_size, C, D, H, W = mu.shape
+        a = a.transpose(1,2).view(batch_size, self.cov_rank, C, -1).flatten(2,3).transpose(1,2)
+    
+        dist = torch.distributions.LowRankMultivariateNormal(
+            mu.view(batch_size, -1), a.reshape(batch_size, C*D*H*W, self.cov_rank // C), sigma.view(batch_size, -1)
+        )
+
+        return dist
+            
+    def calculate_loss(self, targets, logits_mc, sigma, is_sampled = True):
+        
+        loss, loss_attributes = 0., {}
+        if not is_sampled:
+            comb_loss, loss_attributes = self.loss_fn(logits_mc, targets, torch.log(sigma))
+            return comb_loss, loss_attributes
+    
+        for idx in range(self.num_samples):
+            if idx == 0:
+                comb_loss, sample_attributes = self.loss_fn(logits_mc[idx], targets, torch.log(sigma))
+                loss_attributes = {key: 0 for key in sample_attributes.keys()}
+            else:
+                comb_loss, sample_attributes = self.loss_fn(logits_mc[idx], targets)  # Only KL loss once
+
+            loss += comb_loss
+            loss_attributes = {key: val + sample_attributes[key] for key, val in loss_attributes.items()}
+    
+        return loss, loss_attributes
+
+
+class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
+    
+    def __init__(self, 
+                 encoder: Union[PlainConvEncoder, ResidualEncoder],
+                 num_classes: int,
+                 n_conv_per_stage: Union[int, Tuple[int, ...], List[int]],
+                 deep_supervision,
+                 nonlin_first: bool = False,
+                 norm_op: Union[None, Type[nn.Module]] = None,
+                 norm_op_kwargs: Union[None, dict] = None,
+                 dropout_op: Union[None, Type[_DropoutNd]] = None,
+                 dropout_op_kwargs: Union[None, dict] = None,
+                 nonlin: Union[None, Type[torch.nn.Module]] = None,
+                 nonlin_kwargs: Union[None, dict] = None,
+                 conv_bias: Union[None, bool] = None,
+                 cov_rank: int = 16,
+                 num_samples: int = 5,
+                 predict_cov_weighting = False,
+                 cov_weighting_kwargs = None,
+                 **loss_kwargs
+                 ):
+
+        super().__init__(encoder, num_classes, n_conv_per_stage, deep_supervision, nonlin_first, norm_op, norm_op_kwargs, dropout_op, dropout_op_kwargs, nonlin, nonlin_kwargs, conv_bias)
+
+        self.cov_rank = cov_rank
+        self.cov_weighting_kwargs = cov_weighting_kwargs if isinstance(cov_weighting_kwargs, dict) else {} 
+        self.predict_cov_weighting = predict_cov_weighting
+        self.output_stage_meta_diag = {
+            'in_channels': self.seg_layers[-1].in_channels,
+            'out_channels': self.seg_layers[-1].out_channels,
+            'kernel_size': self.seg_layers[-1].kernel_size,
+            'stride': self.seg_layers[-1].stride,
+            'padding': self.seg_layers[-1].padding
+        }
+
+        self.output_stage_meta_cov = self.output_stage_meta_diag.copy()
+        self.output_stage_meta_cov['out_channels'] = cov_rank
+
+        self.diag_head = self.encoder.conv_op(**self.output_stage_meta_diag)
+        self.cov_head = self.encoder.conv_op(**self.output_stage_meta_cov)
+        
+        if self.predict_cov_weighting:
+            num_bases = cov_weighting_kwargs.get('num_bases', cov_rank)
+            self.cov_weighting_head = CovarianceWeightHeadLight(
+                self.diag_head.in_channels, num_bases, cov_rank
+            )
+        
+        self.return_samples = True
+        self.num_samples = num_samples
+
+
+    def forward(self, skips):
+        """
+        we expect to get the skips in the order they were computed, so the bottleneck should be the last entry
+        :param skips:
+        :param targets:
+        :return:
+        """
+        lres_input = skips[-1]
+        seg_outputs = []
+        diag_var_out, cov_out, cov_weighting = None, None, None
+        for s in range(len(self.stages)):
+            x = self.transpconvs[s](lres_input)
+            x = torch.cat((x, skips[-(s+2)]), 1)
+            x = self.stages[s](x)
+
+            is_last = s == len(self.stages) - 1
+            if self.deep_supervision:
+                seg_outputs.append(self.seg_layers[s](x))
+                if is_last:
+                    diag_var_out = self.diag_head(x)
+                    cov_out = self.cov_head(x)
+                    if self.predict_cov_weighting:
+                        cov_weighting = self.cov_weighting_head(x)
+
+            elif s == (len(self.stages) - 1):
+                seg_outputs.append(self.seg_layers[-1](x))
+                diag_var_out = self.diag_head(x)
+                cov_out = self.cov_head(x)
+                if self.predict_cov_weighting:
+                    cov_weighting = self.cov_weighting_head(x)
+
+            lres_input = x
+    
+        # invert seg outputs so that the largest segmentation prediction is returned first
+        seg_outputs = seg_outputs[::-1]
+
+        if not self.deep_supervision:
+            return seg_outputs[0], diag_var_out, cov_out, cov_weighting
+        else:
+            return seg_outputs, diag_var_out, cov_out, cov_weighting
+        
+
+
+class MultipleBasisUNetWithUncertainty(UnetWithUncertainty):
+
+    def __init__(self, input_channels, n_stages, features_per_stage, conv_op, kernel_sizes, strides, n_blocks_per_stage, num_classes, n_conv_per_stage_decoder, conv_bias = False, norm_op = None, norm_op_kwargs = None, dropout_op = None, dropout_op_kwargs = None, nonlin = None, nonlin_kwargs = None, deep_supervision = False, block = BasicBlockD, bottleneck_channels = None, stem_channels = None, cov_rank = 16, num_samples_train = 5,num_samples_inference = 30, return_samples = True, loss_kwargs = None,cov_weighting_kwargs = None, sample_type = 'ours', **kwargs):
+        super().__init__(input_channels, n_stages, features_per_stage, conv_op, kernel_sizes, strides, n_blocks_per_stage, num_classes, n_conv_per_stage_decoder, conv_bias, norm_op, norm_op_kwargs, dropout_op, dropout_op_kwargs, nonlin, nonlin_kwargs, deep_supervision, block, bottleneck_channels, stem_channels, cov_rank, num_samples_train,num_samples_inference, sample_type, return_samples, loss_kwargs,predict_cov_weighting = True, cov_weighting_kwargs = cov_weighting_kwargs, **kwargs)
+        
+        self.num_bases = cov_weighting_kwargs.get('num_bases', 5)
+        self.cov_basis_mat = nn.Parameter(torch.randn(self.num_bases, num_classes, cov_rank))
+        self.sample_type = cov_weighting_kwargs.get('sample_type', 'weighted')
+
+        if self.sample_type == 'convex':
+            self.decoder.cov_weighting_head.top_k = self.num_bases
+        else:
+            self.decoder.cov_weighting_head.top_k = 1
+        
+    
+    
+class PPUnetWithUncertainty(UnetWithUncertainty):
+
+    def __init__(self,
+        input_channels: int,
+        n_stages: int,
+        features_per_stage: Union[int, List[int], Tuple[int, ...]],
+        conv_op: Type[_ConvNd],
+        kernel_sizes: Union[int, List[int], Tuple[int, ...]],
+        strides: Union[int, List[int], Tuple[int, ...]],
+        n_blocks_per_stage: Union[int, List[int], Tuple[int, ...]],
+        num_classes: int,
+        n_conv_per_stage_decoder: Union[int, Tuple[int, ...], List[int]],
+        conv_bias: bool = False,
+        norm_op: Union[None, Type[nn.Module]] = None,
+        norm_op_kwargs: Union[None, dict] = None,
+        dropout_op: Union[None, Type[_DropoutNd]] = None,
+        dropout_op_kwargs: Union[None, dict] = None,
+        nonlin: Union[None, Type[torch.nn.Module]] = None,
+        nonlin_kwargs: Union[None, dict] = None,
+        deep_supervision: bool = False,
+        block: Union[Type[BasicBlockD], Type[BottleneckD]] = BasicBlockD,
+        bottleneck_channels: Union[int, List[int], Tuple[int, ...]] = None,
+        stem_channels: int = None,
+        cov_rank: int = 16,
+        num_samples: int = 5,
+        return_samples: bool = True,
+        loss_kwargs: Union[dict, None] = None,
+        **kwargs):
+        args = (input_channels, n_stages, features_per_stage, conv_op, kernel_sizes, strides, n_blocks_per_stage, 
+                num_classes, n_blocks_per_stage, n_conv_per_stage_decoder, conv_bias, norm_op, norm_op_kwargs, dropout_op, dropout_op_kwargs,
+                nonlin, nonlin_kwargs, deep_supervision, block, bottleneck_channels, stem_channels, cov_rank, num_samples, return_samples, loss_kwargs)
+        
+        super().__init__(*args, **kwargs)
+
+
+        del self.cov_basis_mat
+    
+
+    def forward(self, x, target = None, reduction = 'mean'):
         skips = self.encoder(x)
         mu, log_var_diag, cov_out = self.decoder(skips)
 
         diag_var_out = torch.exp(0.5 * torch.clamp(log_var_diag, self.min_logvar, self.max_logvar))
+
         if self.decoder.deep_supervision:
             mu = mu[0]
 
@@ -182,223 +562,40 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
 
         output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
         return output
-    
-    def basis_model_only(self, only = True):
-        self.evaluate_with_samples = not only
 
-    
-    def calculate_loss(self, targets, logits_mc, sigma, is_sampled = True):
-        
-        loss, loss_attributes = 0., {}
-        if not is_sampled:
-            comb_loss, loss_attributes = self.loss_fn(logits_mc, targets, torch.log(sigma))
-            return comb_loss, loss_attributes
-    
-        for idx in range(self.num_samples):
-            if idx == 0:
-                comb_loss, sample_attributes = self.loss_fn(logits_mc[idx], targets, torch.log(sigma))
-                loss_attributes = {key: 0 for key in sample_attributes.keys()}
-            else:
-                comb_loss, sample_attributes = self.loss_fn(logits_mc[idx], targets)  # Only KL loss once
-
-            loss += comb_loss
-            loss_attributes = {key: val + sample_attributes[key] for key, val in loss_attributes.items()}
-    
-        return loss, loss_attributes
-
-    
-    def sample_logits(self, mu, a, sigma, B, num_samples):
+    def sample_logits(self, mu, diag_var_out, cov_out, num_samples):
         """
         Sample MC logits from a Gaussian with low-rank + diagonal covariance.
 
         Distribution:
             logits ~ N(mu, Σ), with
-            Σ = (B diag(a))(B diag(a))^T + diag(sigma^2)
+            Σ = (P)(P)^T + diag(sigma^2)
 
         Args:
             mu:    [B,C,D,H,W]   mean logits
-            a:     [B,r,D,H,W]   low-rank scales (voxel dependent)
+            cov_out:     [B,r,D,H,W]   low-rank scales (voxel dependent)
             sigma: [B,C,D,H,W]   diagonal std dev
-            B:     [C,r]         learned basis matrix (shared across voxels/batch)
             num_samples: int     number of Monte Carlo samples
             targets: [B,D,H,W]   (optional) target labels, unused here but kept for API compatibility
 
         Returns:
             logits_mc: [K,B,C,D,H,W]   sampled logits
         """
-        Bsz, C, D, H, W = mu.shape
-        r = a.shape[1]  # rank
-
-        # -------------------------------------------------------
-        # 1. Expand mean for sampling
-        # -------------------------------------------------------
-        mu_exp = mu.unsqueeze(0).expand(num_samples, -1, -1, -1, -1, -1)  # [K,B,C,D,H,W]
-
-        # -------------------------------------------------------
-        # 2. Low-rank noise component
-        # -------------------------------------------------------
-        # eps_r ~ N(0, I), shape [K,B,r,D,H,W]
-        eps_r = torch.randn(num_samples, Bsz, r, D, H, W, device=mu.device, dtype=mu.dtype)
-
-        # Scale by 'a': [K,B,r,D,H,W]
-        scaled = eps_r * a.unsqueeze(0)
-
-        # Reshape to [K,B,r,N] with N = D*H*W
-        N = D * H * W
-        scaled = scaled.view(num_samples, Bsz, r, N)
-
-        # Project into C with B:
-        #   B: [C,r], scaled: [K,B,r,N]
-        #   result: [K,B,C,N]
-        low_rank = torch.matmul(B, scaled)  
-
-        # Reshape back to [K,B,C,D,H,W]
-        low_rank_noise = low_rank.view(num_samples, Bsz, C, D, H, W)
-
-        # -------------------------------------------------------
-        # 3. Diagonal noise component
-        # -------------------------------------------------------
-        eps_diag = torch.randn(num_samples, Bsz, C, D, H, W, device=mu.device, dtype=mu.dtype)
-        diag_noise = eps_diag * sigma.unsqueeze(0)
-
-        # -------------------------------------------------------
-        # 4. Combine all parts
-        # -------------------------------------------------------
-        logits_mc = mu_exp + low_rank_noise + diag_noise
-        return logits_mc
-    
-
-    
-    
-    def sample_logits_old(self, mu, a, log_var, num_samples: int, targets=None):
-        """
-        Sample logits ~ N(mu, Σ), Σ = (B diag(a))(B diag(a))^T + diag(σ^2)
-        Shapes:
-          mu:    [B,C,D,H,W]
-          a:     [B,r,D,H,W]
-          sigma: [B,C,D,H,W]
-          num_samples: int
-          targets: [B,D,H,W]
-        Returns:
-          logits_mc: [K,B,C,D,H,W]
-        """
-        Bsz, C, D, H, W = mu.shape
-        r = a.shape[1]
-        if num_samples <= 0:
-            return mu.unsqueeze(0)
-
-        device = mu.device
-        dtype = mu.dtype
-
-        sigma = torch.exp(0.5 * log_var)
-        eps = torch.randn(num_samples, Bsz, C, D, H, W, device=device, dtype=dtype)
-        diagpart = sigma.unsqueeze(0) * eps
-
-        if self.cov_rank > 0:
-            z = torch.randn(num_samples, Bsz, r, D, H, W, device=device, dtype=dtype)
-            # Expand B to broadcast over spatial dims: [1,C,r,1,1,1]
-            B_exp = self.decoder.cov_basis_mat.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-            lowrank = (B_exp * (a.unsqueeze(0).unsqueeze(2) * z.unsqueeze(2))).sum(dim=3)  # [K,B,C,D,H,W]
-            logits = mu.unsqueeze(0) + lowrank + diagpart
-        else:
-            logits = mu.unsqueeze(0) + diagpart
 
 
-        loss, loss_attributes = 0., {}
-        if targets is not None:
-            for idx in range(num_samples):
-                if idx == 0:
-                    comb_loss, sample_attributes = self.loss_fn(logits[idx], targets, torch.log(sigma))
-                    loss_attributes = {key: 0 for key in sample_attributes.keys()}
-                else:
-                    comb_loss, sample_attributes = self.loss_fn(logits[idx], targets)  # Only KL loss once
+        batch_size, C, D, H, W = mu.shape
+        z_one = torch.randn(num_samples, batch_size, C, D, H, W, device=mu.device, dtype=mu.dtype)
+        z_two = torch.randn(num_samples, batch_size, self.cov_rank, device = mu.device, dtype = mu.dtype)
 
-                loss += comb_loss
-                loss_attributes = {key: val + sample_attributes[key] for key, val in loss_attributes.items()}
-        
-        return logits, loss, loss_attributes
+        scalar = 1 / (torch.sqrt(2*(self.cov_rank -1))) 
+
+        low_rank = scalar * cov_out.permute(0, 2, 3, 4, 1).view(batch_size, -1, self.cov_rank) 
 
 
-class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
-    
-    def __init__(self, 
-                 encoder: Union[PlainConvEncoder, ResidualEncoder],
-                 num_classes: int,
-                 n_conv_per_stage: Union[int, Tuple[int, ...], List[int]],
-                 deep_supervision,
-                 nonlin_first: bool = False,
-                 norm_op: Union[None, Type[nn.Module]] = None,
-                 norm_op_kwargs: Union[None, dict] = None,
-                 dropout_op: Union[None, Type[_DropoutNd]] = None,
-                 dropout_op_kwargs: Union[None, dict] = None,
-                 nonlin: Union[None, Type[torch.nn.Module]] = None,
-                 nonlin_kwargs: Union[None, dict] = None,
-                 conv_bias: Union[None, bool] = None,
-                 cov_rank: int = 16,
-                 num_samples: int = 5,
-                 **loss_kwargs
-                 ):
 
-        super().__init__(encoder, num_classes, n_conv_per_stage, deep_supervision, nonlin_first, norm_op, norm_op_kwargs, dropout_op, dropout_op_kwargs, nonlin, nonlin_kwargs, conv_bias)
 
-        self.cov_rank = cov_rank
         
 
-        self.output_stage_meta_diag = {
-            'in_channels': self.seg_layers[-1].in_channels,
-            'out_channels': self.seg_layers[-1].out_channels,
-            'kernel_size': self.seg_layers[-1].kernel_size,
-            'stride': self.seg_layers[-1].stride,
-            'padding': self.seg_layers[-1].padding
-        }
-
-        self.output_stage_meta_cov = self.output_stage_meta_diag.copy()
-        self.output_stage_meta_cov['out_channels'] = cov_rank
-
-        self.diag_head = self.encoder.conv_op(**self.output_stage_meta_diag)
-        self.cov_head = self.encoder.conv_op(**self.output_stage_meta_cov)
-
-        self.return_samples = True
-        self.num_samples = num_samples
-
-
-    def forward(self, skips):
-        """
-        we expect to get the skips in the order they were computed, so the bottleneck should be the last entry
-        :param skips:
-        :param targets:
-        :return:
-        """
-        lres_input = skips[-1]
-        seg_outputs = []
-        diag_var_out, cov_out = None, None
-        for s in range(len(self.stages)):
-            x = self.transpconvs[s](lres_input)
-            x = torch.cat((x, skips[-(s+2)]), 1)
-            x = self.stages[s](x)
-
-            is_last = s == len(self.stages) - 1
-            if self.deep_supervision:
-                seg_outputs.append(self.seg_layers[s](x))
-                if is_last:
-                    diag_var_out = self.diag_head(x)
-                    cov_out = self.cov_head(x)
-
-
-            elif s == (len(self.stages) - 1):
-                seg_outputs.append(self.seg_layers[-1](x))
-                diag_var_out = self.diag_head(x)
-                cov_out = self.cov_head(x)
-
-            lres_input = x
-
-        # invert seg outputs so that the largest segmentation prediction is returned first
-        seg_outputs = seg_outputs[::-1]
-
-        if not self.deep_supervision:
-            return seg_outputs[0], diag_var_out, cov_out
-        else:
-            return seg_outputs, diag_var_out, cov_out
 
 
 class UncertaintySegLoss(nn.Module):
@@ -477,6 +674,8 @@ class VariationalLoss(nn.Module):
                  lambda_nll=1.0,
                  lambda_kl=1e-4,
                  smooth=1e-6,
+                 lambda_weight = 0.2,
+                 lambda_orth = 0.1,
                  reduction="mean",
                  num_total = 100,
                  **kwargs):
@@ -490,16 +689,65 @@ class VariationalLoss(nn.Module):
         self.reduction = reduction
         self.ce_forward = nn.CrossEntropyLoss(reduction=reduction)
         self.num_total = num_total
+        self.lambda_orth = lambda_orth
+        self.lambda_weight = lambda_weight
 
-    def forward(self, logits, target, log_var = None):
-
+        print("Loss initialized with ce:", lambda_ce, 'dice:', lambda_dice, 'kl:', lambda_kl)
+    
+    def forward(self, logits, target, log_var = None, weighting = None, cov_basis = None):
+        
         ce_loss = self.ce_forward(logits, target)
+        orth_loss, weighting_loss = torch.zeros_like(ce_loss),torch.zeros_like(ce_loss) 
+
         dice_loss = self.dice_loss(F.softmax(logits, dim = 1), target, num_classes = 2)
         kl_loss = torch.zeros_like(ce_loss) if log_var is None else self.kl_loss(log_var, self.num_total)
 
         loss = self.lambda_ce * ce_loss + self.lambda_dice * dice_loss + self.lambda_kl * kl_loss
-        return loss, {'cross_entropy': ce_loss.item(), 'dice': dice_loss.item(), 'kl_loss': kl_loss.item()}
 
+        if weighting is not None:
+            weighting_loss = self.weighting_loss(weighting) 
+            loss += weighting_loss * self.lambda_weight
+        if cov_basis is not None:
+            orth_loss = self.orthogonal_cov_basis_loss(cov_basis)
+            loss += orth_loss * self.lambda_orth
+        
+        
+        return loss, {'cross_entropy': ce_loss.item(), 'dice': dice_loss.item(), 'kl': kl_loss.item(),
+                      'orth': orth_loss.item(), 'weight': weighting_loss.item()}
+
+    @staticmethod
+    def weighting_loss(weighting):
+        """
+        param weighting: torch.tensor of shape (N, R) i.e the softmax outputs of the weighting of the bases 
+        """
+        # Add small epsilon to avoid log(0)
+        eps = 1e-8
+        entropy = - (weighting * (weighting + eps).log()).sum(dim=1)  # [B, D, H, W]
+
+        # Mean entropy across batch & volume
+        entropy_loss = -entropy.mean()
+        return entropy_loss
+
+    
+    @staticmethod
+    def orthogonal_cov_basis_loss(cov_basis):
+        """
+        param cov_basis: torch.tensor of shape (N, C, R) basis matrices for the covariance  
+        """
+
+        N = cov_basis.shape[0]
+        B_flat = cov_basis.view(N, -1)  # [N, C*r]
+
+        # Normalize rows (optional, for scale invariance)
+        B_norm = F.normalize(B_flat, dim=1)
+
+        # Compute Gram matrix
+        G = torch.matmul(B_norm, B_norm.T)  # [N, N]
+
+        # Penalize off-diagonal entries
+        I = torch.eye(G.shape[0], device=G.device)
+        orth_loss = ((G - I)**2).sum() / (N * (N - 1))
+        return orth_loss
 
     @staticmethod
     def kl_loss(log_var, num_total = 1000):
@@ -522,23 +770,55 @@ class VariationalLoss(nn.Module):
         return 1. - dice
 
 
+
+
+MODEL_CLASSES = {
+    'standard_uncertainty': UnetWithUncertainty,
+    'weighted_basis': MultipleBasisUNetWithUncertainty
+}
+
 def get_model_from_base_kwargs(path_to_base, **kwargs):
 
     base_kwargs = pickle.load(open(path_to_base, 'rb'))
     base_kwargs['loss_kwargs'] = kwargs.pop('loss_kwargs', dict())
+    
+    model_class_name = kwargs.pop('model_type', 'standard_uncertainty')
+    
+    model_class = MODEL_CLASSES[model_class_name]
     for key, val in kwargs.items():
         base_kwargs[key] = val
 
-    model = UnetWithUncertainty(**base_kwargs)
+    model = model_class(**base_kwargs)
     return model
 
 
 
 if __name__ == '__main__':
 
+    model_kwargs = {
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'model_type': 'weighted_basis',
+        'cov_weighting_kwargs': {
+            'num_bases': 5
+        } 
+
+    }
+    
     path_to_base = r"/home/pjtka/ndsegment/NDSegRef/uncertainty/info_dict.pkl"
-    model = get_model_from_base_kwargs(path_to_base)
+    path_to_base = model_kwargs.pop('path_to_base')
+    
+    model = get_model_from_base_kwargs(path_to_base, **model_kwargs)
     model = model.to('cuda')
+    data = torch.rand((2, 1, 128, 128, 128)).to('cuda')
+    model(data)
+    breakpoint()
     state_dict = torch.load(
         '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth'
     ,weights_only=False)
