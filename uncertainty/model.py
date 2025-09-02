@@ -154,7 +154,8 @@ class CovarianceWeightHeadLight(nn.Module):
 
 class PartitionedCovarianceHead(nn.Module):
     def __init__(self, in_channels, num_bases, volume_size):
-        
+
+        pass
 
 
 class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
