@@ -209,7 +209,7 @@ def run_training(dataset_name_or_id: Union[str, int],
             cudnn.benchmark = True
 
         if not only_run_validation:
-            nnunet_trainer.run_training()
+            nnunet_trainer.run_training(params)
 
         if val_with_best:
             nnunet_trainer.load_checkpoint(join(nnunet_trainer.output_folder, 'checkpoint_best.pth'))
@@ -287,7 +287,7 @@ def get_trainer(fold = 0):
         'val': "",
         'disable_checkpointing': "",
         'val_best': "",
-        'device': 'cuda',
+        'device': 'cpu',
         'return_trainer': False
     }
     from argparse import Namespace

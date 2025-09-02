@@ -56,13 +56,16 @@ idx = 0
 
 for subj in tqdm(subjects):
     ct_path = os.path.join(base_dir, subj, "ct.nii.gz")
-    seg_path = os.path.join(base_dir, subj, "segmentations", "pancreas.nii.gz")
+    seg_path = os.path.join(base_dir, subj, "segmentations", "humerus.nii.gz")
 
     seg_nib = nib.load(seg_path)
     seg_arr = seg_nib.get_fdata(dtype=np.float32)
     
     if np.max(seg_arr) != 1:
+        print(f"Skipping {subj}: Max segmentation value != 1")
         continue
+    
+    continue
 
     img_nib = nib.load(ct_path)
     arr = img_nib.get_fdata(dtype=np.float32)
