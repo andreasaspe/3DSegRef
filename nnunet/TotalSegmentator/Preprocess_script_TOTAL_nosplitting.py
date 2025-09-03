@@ -11,8 +11,8 @@ from functools import partial
 #############################
 # CONFIGURATION
 #############################
-organ = "pancreas" # target organ NOT CAPITALIZED!!!
-dataset_id = 13 # integer ID for dataset
+organ = "humerus_right" # target organ NOT CAPITALIZED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+dataset_id = 22 # integer ID for dataset
 dataset_name_and_id = f"Dataset{dataset_id:03d}_TotalSegmentator{organ.capitalize()}" # Format: DatasetXXX_TotalSegmentatorOrgan. Etc: Dataset005_TotalSegmentatorSpleen
 
 # Base directories
@@ -20,10 +20,14 @@ base_dir = f"/scratch/awias/data/Totalsegmentator_dataset_v201"
 savepath_root = f"/scratch/awias/data/{dataset_name_and_id}_filtered"
 nnunet_root = f"/scratch/awias/data/nnUNet/nnUNet_raw/{dataset_name_and_id}"
 
+# Gallbladder
+# Adrenal_gland_left
+# Adrenal_gland_right
+# Duodenum
+# Portal_vein_and_splenic_vein
+# Humerus_left
+# Humerus_right
 
-# Train/test split ratio
-test_size = 0.2
-random_state = 42
 
 #############################
 # HELPERS
