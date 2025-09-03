@@ -11,7 +11,7 @@ from functools import partial
 #############################
 # CONFIGURATION
 #############################
-organ = "Pancreas" # target organ NOT CAPITALIZED!!!
+organ = "pancreas" # target organ NOT CAPITALIZED!!!
 dataset_id = 13 # integer ID for dataset
 dataset_name_and_id = f"Dataset{dataset_id:03d}_TotalSegmentator{organ.capitalize()}" # Format: DatasetXXX_TotalSegmentatorOrgan. Etc: Dataset005_TotalSegmentatorSpleen
 
@@ -101,29 +101,23 @@ def main():
     error_count = sum(1 for r in results if "Error" in r)
     print(f"Finished preprocessing. Success: {success_count}, Skipped: {skip_count}, Errors: {error_count}")
 
-    print("\nStep 2/2: Creating nnU-Net folder structure and splitting train/test...")
+    print("\nStep 2/2: Creating nnU-Net folder structure (all data goes to training set)...")
 
     output_image_tr_path = os.path.join(nnunet_root, "imagesTr")
     output_label_tr_path = os.path.join(nnunet_root, "labelsTr")
-    output_image_ts_path = os.path.join(nnunet_root, "imagesTs")
-    output_label_ts_path = os.path.join(nnunet_root, "labelsTs")
 
     os.makedirs(output_image_tr_path, exist_ok=True)
     os.makedirs(output_label_tr_path, exist_ok=True)
-    os.makedirs(output_image_ts_path, exist_ok=True)
-    os.makedirs(output_label_ts_path, exist_ok=True)
 
+    # Collect all subjects
     all_subjects = [x.split('_')[0] for x in os.listdir(savepath_root) if x.endswith("img.nii.gz")]
-    train_subjects, test_subjects = train_test_split(all_subjects, test_size=test_size, random_state=random_state)
-
-    print(f"Number of training subjects: {len(train_subjects)}")
-    print(f"Number of test subjects: {len(test_subjects)}")
+    print(f"Number of training subjects (no split): {len(all_subjects)}")
 
     def copy_files(subjects, image_dest, label_dest):
         for subject in tqdm(subjects):
             image_src = os.path.join(savepath_root, f"{subject}_img.nii.gz")
             label_src = os.path.join(savepath_root, f"{subject}_msk.nii.gz")
-            subject_number = str(int(subject[1:]))
+            subject_number = str(int(subject[1:]))  # remove leading 's'
             image_dst = os.path.join(image_dest, f"{subject_number}_0000.nii.gz")
             label_dst = os.path.join(label_dest, f"{subject_number}.nii.gz")
             if os.path.exists(image_src) and os.path.exists(label_src):
@@ -132,13 +126,12 @@ def main():
             else:
                 print(f"Missing files for subject {subject}")
 
-    copy_files(train_subjects, output_image_tr_path, output_label_tr_path)
-    copy_files(test_subjects, output_image_ts_path, output_label_ts_path)
- 
+    copy_files(all_subjects, output_image_tr_path, output_label_tr_path)
+
     # Optionally, remove the temporary filtered dataset folder
     shutil.rmtree(savepath_root)
 
-    print("\nAll done! Dataset prepared for nnU-Net.")
+    print("\nAll done! Dataset prepared for nnU-Net (all data in training set).")
 
 if __name__ == "__main__":
     main()
