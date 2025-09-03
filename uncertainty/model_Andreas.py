@@ -30,6 +30,8 @@ class UncertaintyModelOutput(ModelOutput):
     sample_logits: Optional[torch.FloatTensor] = None
     loss: Optional[torch.FloatTensor] = None
     loss_decomp: Optional[dict] = None
+    variance: Optional[torch.FloatTensor] = None
+    entropy: Optional[torch.FloatTensor] = None
 
 
 
@@ -252,6 +254,7 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         self.min_logvar, self.max_logvar = -5, 5
         self.evaluate_with_samples = True
         self.sample_type = sample_type
+        self.get_variance = True
 
     def forward(self, x, targets = None, reduction = "none", scaler = None):
 
@@ -268,13 +271,19 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
 
         logits = None
         loss, loss_attributes = None, None
-
+    
         if not self.evaluate_with_samples:
             if targets is not None:
                 loss, loss_attributes = self.loss_fn(mu, targets)
             return UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
         
+        if self.get_variance:
+            loss, loss_attributes, mu, variance = self.online_sampling_and_loss_and_variance(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
+            output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes, variance)
+            return output
+        
         num_samples = self.num_samples_train if self.training else self.num_samples_inference
+
         if targets is not None:
             loss, loss_attributes, mu =  self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
         else:
@@ -333,6 +342,50 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
 
         return loss, loss_attributes, prediction
     
+    
+    
+    def online_sampling_and_loss_and_variance(self, targets, mu, a, sigma, weighting, num_samples, scaler = None):
+            
+            loss, loss_attributes = 0., {}
+
+            distribution = self.get_distribution(mu, a, sigma, self.cov_basis_mat, weighting)
+            prediction = None
+            softmaxed_samples = []
+
+            for idx in range(num_samples):
+                sample = distribution.sample()
+                sample = sample.view(mu.shape)
+                
+                # Apply softmax over channel dimension (dim=1)
+                softmax_sample = torch.nn.functional.softmax(sample, dim=1)
+                softmaxed_samples.append(softmax_sample)
+
+                if idx == 0:
+                    prediction = sample.detach()
+                    
+                    if isinstance(distribution, (ConvexSamplerWeighted, )):
+                        comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting=weighting, cov_basis = self.cov_basis_mat)
+                    else:
+                        comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting = weighting)
+
+                    loss_attributes = {key: 0 for key in sample_attributes.keys()}
+                else:
+                    comb_loss, sample_attributes = self.loss_fn(sample, targets)
+                    prediction+=sample
+
+                loss += comb_loss
+                loss_attributes = {key: val + sample_attributes[key] for key, val in loss_attributes.items()}
+
+            loss_attributes = {key: val / num_samples for key, val in loss_attributes.items()}    
+            prediction = prediction / num_samples
+            
+            
+            # Stack and compute variance across samples (dim=0)
+            stacked_softmax = torch.stack(softmaxed_samples, dim=0)  # shape: [num_samples, 30, 2, 224, 160, 192]
+            entropy = -torch.sum(stacked_softmax * torch.log(stacked_softmax + 1e-8), dim=0)
+            variance = torch.var(stacked_softmax, dim=0)  # shape: [1, 2, 224, 160, 192]
+
+            return loss, loss_attributes, prediction, variance, entropy
 
     def get_distribution(self, mu, low_rank, sigma, basis_matrix, weighting):
         
@@ -797,22 +850,23 @@ def get_model_from_base_kwargs(path_to_base, **kwargs):
 if __name__ == '__main__':
 
     model_kwargs = {
-        'checkpoint_path': '/scratch/awias/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'checkpoint_path': '/home/awias/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
                         'lambda_ce':1.0,
                         'lambda_dice':1.0,
                         'lambda_nll': 1.0,
                         'lambda_kl': 1e-4
                     },
-        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-        'model_type': 'weighted_basis',
+        'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'model_type': 'standard_uncertainty',
         'cov_weighting_kwargs': {
             'num_bases': 5
         } 
 
     }
     
-    path_to_base = "/scratch/awias/data/nnUNet/info_dict_4.pkl"
+    # path_to_base = "/scratch/awias/data/nnUNet/info_dict_4.pkl"
+    path_to_base = "/home/awias/data/nnUNet/info_dict_4.pkl"
     path_to_base = model_kwargs.pop('path_to_base')
     
     model = get_model_from_base_kwargs(path_to_base, **model_kwargs)
@@ -820,7 +874,7 @@ if __name__ == '__main__':
     data = torch.rand((2, 1, 128, 128, 128)).to('cuda')
     model(data)
     state_dict = torch.load(
-        '/scratch/awias/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth'
+        '/home/awias/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth'
     ,weights_only=False)
     own_state_dict = model.state_dict()
     model.load_state_dict(state_dict, strict=True)
