@@ -7,7 +7,8 @@ export nnUNet_raw="/scratch/awias/data/nnUNet/nnUNet_raw"
 export nnUNet_results="/scratch/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/scratch/awias/data/nnUNet/nnUNet_preprocessed"
 
-
+srun --gres=gpu -c 8 --pty --mem 40g bash
+srun -c 16 --mem=32G --pty bash
 
 export nnUNet_raw="/home/awias/data/nnUNet/nnUNet_raw"
 export nnUNet_results="/home/awias/data/nnUNet/nnUNet_results"

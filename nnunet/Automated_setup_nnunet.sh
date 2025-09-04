@@ -29,3 +29,5 @@ nnUNetv2_plan_experiment -d $ID -c 3d_fullres -pl nnUNetPlannerResEncL -np 4
 
 # Step 7: Preprocess dataset
 nnUNetv2_preprocess -d $ID -c 3d_fullres -pl nnUNetResEncUNetLPlans -np 8
+
+exit
