@@ -278,7 +278,7 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             return UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
         
         if self.get_variance:
-            loss, loss_attributes, mu, variance = self.online_sampling_and_loss_and_variance(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
+            loss, loss_attributes, mu, variance, entropy = self.online_sampling_and_loss_and_variance(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
             output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes, variance)
             return output
         
