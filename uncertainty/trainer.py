@@ -18,6 +18,7 @@ import numpy as np
 from argparse import ArgumentParser, Namespace
 import ast
 from dataloaders import HackyEvalLoader
+
 warnings.filterwarnings('ignore', category=UserWarning)
 
 torch.set_num_interop_threads(1)
@@ -134,6 +135,7 @@ class Trainer(object):
         self.training_kwargs = training_kwargs
         self.model_kwargs['loss_kwargs'] = training_kwargs['loss_kwargs']
         self.get_eval_loader_from_saved = training_kwargs.get('eval_loader_data_path', "")
+        self.get_test_loader_from_saved = training_kwargs.get('test_loader_data_path', "")
 
         self.train_loader, self.eval_loader, self.num_batches_train, self.num_batches_eval = (
             None, None, 100, 100
@@ -147,7 +149,7 @@ class Trainer(object):
         self.optimizer = self.setup_optimizer()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.scaler = None
-        self.train_loader, self.eval_loader = self.setup_data()
+        self.train_loader, self.eval_loader, self.test_loader = self.setup_data()
         self.num_iterations_per_epoch = training_kwargs.get('num_iterations_per_epoch', 250)
         self.num_val_iterations = training_kwargs.get('num_val_iterations', 50)
         self.last_saved_model_path = ""
@@ -157,6 +159,11 @@ class Trainer(object):
         self.last_performance_diff = None
         self.gradient_accumulation = self.training_kwargs.get('gradient_accumulation', False)
 
+        if self.test_loader is None:
+            print('Test loader is None, switching to validation loader for final evals')
+        
+            self.test_loader = self.eval_loader
+        
 
     def setup_optimizer(self,):
         """
@@ -169,12 +176,21 @@ class Trainer(object):
         return optimizer
 
     def setup_data(self, ):
-        self.train_loader, self.eval_loader = get_data_loader()
+
+        dataloaders = get_data_loader()
+        self.test_loader = None
+        if len(dataloaders) == 3:
+            self.train_loader, self.eval_loader, self.test_loader = dataloaders
+        else:
+            self.train_loader, self.eval_loader = dataloaders
 
         if self.get_eval_loader_from_saved:
             self.eval_loader = HackyEvalLoader(self.get_eval_loader_from_saved)
-
-        return self.train_loader, self.eval_loader
+            
+        if self.get_test_loader_from_saved and self.test_loader is not None:
+            self.test_loader = HackyEvalLoader(self.get_test_loader_from_saved, self.test_loader, recreate=False)
+        
+        return self.train_loader, self.eval_loader, self.test_loader
 
     def prepare_output_dir(self, ):
         os.makedirs(self.output_dir, exist_ok=True)
@@ -272,11 +288,10 @@ class Trainer(object):
         print({key: f"{sum(val)/len(val):0.3f}" for key, val in running_metrics.items()})
     
     @torch.no_grad()
-    def run_evaluation_new(self, eval_loader = None, basis_model_only = False):
+    def run_evaluation_new(self, eval_loader = None, basis_model_only = False, pass_to_keeper = True):
 
         if eval_loader is None:
             eval_loader = self.eval_loader
-
 
         if not isinstance(eval_loader, HackyEvalLoader):
             return self.run_evaluation(eval_loader=eval_loader, basis_model_only=basis_model_only)
@@ -294,7 +309,7 @@ class Trainer(object):
         if hasattr(self.model.decoder, 'cov_weighting_head'):
             self.model.decoder.cov_weighting_head.track_chosen_indices()
 
-        results = {'dice_score': [], 'cross_entropy_mean': []}
+        results = {'dice_score': [], 'NLL':[]}
         for i in range(num_eval_steps):
             elem = eval_loader[i]
             input_volume, target = self.handle_various_input(elem)
@@ -308,35 +323,56 @@ class Trainer(object):
             
             for loss_type, val in output.loss_decomp.items():
                     results[loss_type].append(val)
-        
-            cross_entropy = ce_forward(output.mu, target)
             
             dice = dice_score(output.mu, target)
             results['dice_score'].append(dice)
-            results['cross_entropy_mean'].append(cross_entropy.item())
+            results['NLL'].append(self.negative_log_likelihood(output.mu, target))
             performance = {key: val[-1] for key, val in results.items()}
             performance_holder.update(elem['keys'][0].item(), performance)
             eval_loader_bar.update(1)
         
-        
         metrics = {key: sum(val) / len(val) for key, val in results.items()}
+        
         if hasattr(self.model.decoder, 'cov_weighting_head'):
-            metrics['basis_indices'] = {
-                val: self.model.decoder.cov_weighting_head.chosen_indices.count(val) for val in np.unique(
-                    self.model.decoder.cov_weighting_head.chosen_indices
-                )
-            }
+            if hasattr(self.model.decoder.cov_weighting_head, 'basis_counts'):
+                metrics['basis_indices'] = {
+                    idx: val for idx, val in enumerate(self.model.decoder.cov_weighting_head.basis_counts)
+                }
+            else:
+                metrics['basis_indices'] = {
+                    val: self.model.decoder.cov_weighting_head.chosen_indices.count(val) for val in np.unique(
+                        self.model.decoder.cov_weighting_head.chosen_indices
+                    )
+                }
+            
             self.model.decoder.cov_weighting_head.track_chosen_indices(False)
         
             print(metrics['basis_indices'])
-        if basis_model_only:
-            self.basis_model_results_keeper = performance_holder
-        else:
-            self.trained_models_results_keeper = performance_holder
+
+        if pass_to_keeper:
+            if basis_model_only:
+                self.basis_model_results_keeper = performance_holder
+            else:
+                self.trained_models_results_keeper = performance_holder
+        
         self.model.basis_model_only(False)
-        
-        return metrics, performance_holder.mean()
-        
+        return metrics, performance_holder.mean(), performance_holder
+    
+    @staticmethod
+    def negative_log_likelihood(probs, target):
+        target_expanded = target.unsqueeze(1)  # [B, 1, H, W, D]
+
+        # Step 2: gather probs for the correct class
+        # gather along class dim (dim=1)
+        true_probs = probs.gather(1, target_expanded)  # [B, 1, H, W, D]
+
+        # Step 3: remove the singleton class dimension
+        true_probs = true_probs.squeeze(1)  # [B, H, W, D]
+
+        # Step 4: compute NLL
+        nll = -torch.log(true_probs + 1e-8).mean()
+        return nll.item()
+
     @torch.no_grad()
     def run_evaluation(self, eval_loader = None, basis_model_only = False):
 
@@ -374,10 +410,10 @@ class Trainer(object):
             for loss_type, val in output.loss_decomp.items():
                     results[loss_type].append(val)
             
-            cross_entropy = ce_forward(output.mu, target)
+            
             dice = dice_score(output.mu, target)
             results['dice_score'].append(dice)
-            results['cross_entropy_mean'].append(cross_entropy.item())
+            results['NLL'].append(self.negative_log_likelihood(output.mu, target))
             performance = {key: val[-1] for key, val in results.items()}
             performance_holder.update(elem['keys'][0].item(), performance)
             has_been_identified[elem['keys'][0].item()] = True
@@ -390,7 +426,6 @@ class Trainer(object):
         print("Number of wrong hits by this stupid code was:", wrong_hits_counter)
         assert len(set(performance_holder.performances.keys()) - set(has_been_identified.keys())) == 0
         
-     
         metrics = {key: sum(val) / len(val) for key, val in results.items()}
 
         if basis_model_only:
@@ -401,15 +436,15 @@ class Trainer(object):
         return metrics, performance_holder.mean()
 
 
-    def save_model(self, epoch):
+    def save_model(self, epoch, experiment_name = ""):
 
-        model_save_path = os.path.join(self.output_dir, 'model_epoch_{}.pth'.format(epoch))
+        model_save_path = os.path.join(self.output_dir, 'exp_{}_model_epoch_{}.pth'.format(experiment_name, epoch))
         torch.save(self.model.state_dict(), model_save_path)
-        print("Saved model to", os.path.join(self.output_dir, 'model_epoch_{}.pth'.format(epoch)))
+        print("Saved model to", os.path.join(self.output_dir, 'exp_{}_model_epoch_{}.pth'.format(experiment_name, epoch)))
 
         if self.last_saved_model_path:
             os.remove(self.last_saved_model_path)
-            self.last_saved_model_path = model_save_path
+        self.last_saved_model_path = model_save_path
 
     def finalize(self):
 
@@ -423,20 +458,28 @@ class Trainer(object):
 
         logger = Logger(self.output_dir, experiment_name=experiment_name)
 
+        test_logger = Logger(self.output_dir, experiment_name=f"{experiment_name}_test")
+
         performance = {'dice_score': -1}
         best_performance = 0
         self.model.to(self.device)
-        basis_metrics, mean_perf = self.run_evaluation_new(basis_model_only=True)
+        basis_metrics, mean_perf, _ = self.run_evaluation_new(basis_model_only=True)
+        basis_metrics_test, mean_perf_test, basis_performance_holder_test = self.run_evaluation_new(
+           eval_loader=self.test_loader, basis_model_only=True, pass_to_keeper=False
+        )
 
         print(basis_metrics)
         print(mean_perf)
-    
+        print("#"*20)
+        print(basis_metrics_test)
+        print(mean_perf_test)
+
         logger.write(basis_metrics, key = 'init_metrics')
         logger.write(self.training_kwargs, 'training_kwargs')
 
         for epoch in range(self.training_kwargs['num_epochs']):
             self.train_one_epoch(epoch, last_performance = performance)
-            performance, mean_perf = self.run_evaluation_new()
+            performance, mean_perf,_ = self.run_evaluation_new()
             
             basis_model_performance = self.basis_model_results_keeper.mean_with_other(
                 self.trained_models_results_keeper
@@ -447,10 +490,19 @@ class Trainer(object):
 
             performance_diff = trained_model_performance - basis_model_performance
             self.last_performance_diff = performance_diff.performances
+        
             if performance['dice_score'].item() > best_performance:
-                self.save_model(epoch)
+                self.save_model(epoch, experiment_name=experiment_name)
                 best_performance = performance['dice_score'].item()
-            
+                test_performance, test_mean_performance, test_performance_holder = self.run_evaluation_new(eval_loader=self.test_loader, pass_to_keeper=False)
+
+                basis_model_test_performance = basis_performance_holder_test.mean_with_other(test_performance_holder)
+                trained_model_test_performance = test_performance_holder.mean_with_other(basis_performance_holder_test)
+                performance_diff_test = trained_model_test_performance - basis_model_test_performance
+                test_logger.write(performance_diff_test.performances, key = 'performance_diff')
+                test_logger.write(test_performance, key = 'training_performance')
+                print('performance diff test:', performance_diff_test)
+
             logger.write(performance_diff.performances, key = 'performance_diff')
             logger.write(performance, key = 'training_performance')
         
@@ -531,7 +583,45 @@ def run_ppt(args):
                     },
         
         'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+        'test_loader_data_path': '/scratch/pjtka/pancreas_test',
     }
+
+    run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
+    
+
+def run_diag(args):
+    model_kwargs = {
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+        'sample_type': 'diagonal'
+    }
+    
+    training_kwargs = {
+        'num_epochs': 20,
+        'lr': 1e-4,
+        'weight_decay': 1e-4,
+        'output_dir': args.outdir,
+        'num_iterations_per_epoch': 250,
+        'num_val_iterations': 5,
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        
+        'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+        'test_loader_data_path': '/scratch/pjtka/pancreas_test',
+    }
+
 
     run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
     
@@ -548,7 +638,10 @@ def run_basic(args):
                     },
         'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
-        'num_samples_inference': 30
+        'num_samples_inference': 30,
+        'cov_weighting_kwargs': {
+            'sample_type': 'basic_proper'
+        }
     }
 
     training_kwargs = {
@@ -566,13 +659,17 @@ def run_basic(args):
                     },
         
         'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+        'test_loader_data_path': '/scratch/pjtka/pancreas_test',
     }
 
     run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
-    
+
+
+
 
 def run_multiple_bases(args):
 
+    from model import PartionedCovHead
     model_kwargs = {
         'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
@@ -585,7 +682,8 @@ def run_multiple_bases(args):
         'model_type': 'weighted_basis',
         'cov_weighting_kwargs': {
             'num_bases': 2,
-            'sample_type': 'weighted'
+            'sample_type': 'partitioned',
+            'class': PartionedCovHead
         },
         'num_samples_train': 5,
         'num_samples_inference': 30
@@ -602,10 +700,11 @@ def run_multiple_bases(args):
                         'lambda_ce': 1.0,
                         'lambda_dice': 1.0,
                         'lambda_nll': 1.0,
-                        'lambda_kl': 5*1e-4
+                        'lambda_kl': 1e-4
                     },
 
         'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+        'test_loader_data_path': '/scratch/pjtka/pancreas_test',
         'gradient_accumulation': False
     }
 
@@ -628,7 +727,8 @@ if __name__ == '__main__':
         'basic': run_basic,
         'grid': run_weighting_grid_search,
         'multi_basis': run_multiple_bases,
-        'ppt': run_ppt
+        'ppt': run_ppt,
+        'diag': run_diag
     }
     assert len(args.exp_type) == len(args.exp_name), 'We require new name for each experiment type otherwise it will overwrite'
 
