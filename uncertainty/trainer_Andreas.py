@@ -190,7 +190,11 @@ class Trainer(object):
         else:
             print("Starting from checkpoint {}".format(checkpoint_path))
             own_state_dict = model.state_dict()
-            pretrained_state_dict = torch.load(checkpoint_path, weights_only=False)['network_weights']
+            if self.model_kwargs['basic']: # Raw nn-unet output. Has more keys than just network_weights and thus we need to specify
+                pretrained_state_dict = torch.load(checkpoint_path, weights_only=False)['network_weights']
+            else: # After stocastic training
+                pretrained_state_dict = torch.load(checkpoint_path, weights_only=False)
+
 
             if any('decoder.encoder' in key for key in own_state_dict.keys()):
                 new_state_dict = {}
@@ -372,47 +376,72 @@ class Trainer(object):
             target = target.to(self.device, non_blocking=True).long()
             output = self.model(input_volume, target, reduction = 'mean')
 
-            savepath = "/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/pred"
+            savepath_root = "/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/pred"
+            subject = elem['keys'].item()
             # Assuming output.variance is a tensor of shape [1, 2, 224, 160, 192]
             if output.variance is not None:
                 print("Yay, variance is not None")
+                savepath = os.path.join(savepath_root, "variance")
                 os.makedirs(savepath, exist_ok=True)
                 variance = output.variance.detach().cpu().numpy()  # shape: (1, 2, 224, 160, 192)
-                for class_idx in range(variance.shape[1]):
-                    # Remove batch dimension
-                    class_variance = variance[0, class_idx]
-                    class_variance = (class_variance - class_variance.min()) / (class_variance.max() - class_variance.min() + 1e-8) * 100
-                    nifti_img = nib.Nifti1Image(class_variance, affine=np.eye(4))
-                    nib.save(nifti_img, os.path.join(savepath, f"variance_class_{class_idx}_sample_{i}.nii.gz"))
+                # for class_idx in range(variance.shape[1]):
+                #     # Remove batch dimension
+                #     class_variance = variance[0, class_idx]
+                #     class_variance = (class_variance - class_variance.min()) / (class_variance.max() - class_variance.min() + 1e-8) * 100
+                #     nifti_img = nib.Nifti1Image(class_variance, affine=np.eye(4))
+                #     nib.save(nifti_img, os.path.join(savepath, f"variance_class_{class_idx}_sample_{i}.nii.gz"))
 
+                # Remove batch dimension
+                variance_foreground = variance[0, 1]
+                nifti_img = nib.Nifti1Image(variance_foreground, affine=np.eye(4))
+                nib.save(nifti_img, os.path.join(savepath, f"variance_{subject}_stochastic.nii.gz"))
 
+                entropy = output.entropy.detach().cpu().numpy().squeeze(0).astype(np.float32)  # shape: (224, 160, 192)
                 prediction_np = output.mu.argmax(1).squeeze(0).detach().cpu().numpy().astype(np.uint8)
                 target_np = target.squeeze(0).detach().cpu().numpy().astype(np.uint8)
                 input_np = input_volume.squeeze(0,1).detach().cpu().numpy().astype(np.float32)
 
                 nifti_input = nib.Nifti1Image(input_np, affine=np.eye(4))
-                nib.save(nifti_input, os.path.join(savepath, f"input_sample_{i}.nii.gz"))
+                nib.save(nifti_input, os.path.join(savepath, f"input_{subject}_stochastic.nii.gz"))
                 
                 nifti_pred = nib.Nifti1Image(prediction_np, affine=np.eye(4))
-                nib.save(nifti_pred, os.path.join(savepath, f"prediction_sample_{i}.nii.gz"))
+                nib.save(nifti_pred, os.path.join(savepath, f"prediction_{subject}_stochastic.nii.gz"))
 
                 nifti_target = nib.Nifti1Image(target_np, affine=np.eye(4))
-                nib.save(nifti_target, os.path.join(savepath, f"target_sample_{i}.nii.gz"))
+                nib.save(nifti_target, os.path.join(savepath, f"target_{subject}_stochastic.nii.gz"))
+
+                nifti_entropy = nib.Nifti1Image(entropy, affine=np.eye(4))
+                nib.save(nifti_entropy, os.path.join(savepath, f"entropy_{subject}_stochastic.nii.gz"))
                 return
             
             if basis_model_only:
-                print("Variance is None. This must mean we are running basis_model_only")
+                print("Yay, variance is not None")
+                savepath = os.path.join(savepath_root, "basis_model_only")
+                os.makedirs(savepath, exist_ok=True)
                 
                 mu = output.mu # logits (mu is eta_mu)
                 mu_prop = torch.softmax(mu, dim=1)  # probabilities
                 entropy = -torch.sum(mu_prop * torch.log(mu_prop + 1e-8), dim=1)
-                print("Entropy shape:", entropy.shape)
-                print("Entropy stats: min {:.4f}, max {:.4f}, mean {:.4f}".format(entropy.min().item(), entropy.max().item(), entropy.mean().item()))
+                
+                entropy_np = entropy.detach().cpu().numpy().squeeze(0).astype(np.float32)
+                prediction_np = mu.argmax(1).squeeze(0).detach().cpu().numpy().astype(np.uint8)
+                target_np = target.squeeze(0).detach().cpu().numpy().astype(np.uint8)
+                input_np = input_volume.squeeze(0,1).detach().cpu().numpy().astype(np.float32)
 
-                entropy_np = entropy.squeeze(0).detach().cpu().numpy().astype(np.float32)
+                nifti_input = nib.Nifti1Image(input_np, affine=np.eye(4))
+                nib.save(nifti_input, os.path.join(savepath, f"input_{subject}_basic.nii.gz"))
+                
+                nifti_pred = nib.Nifti1Image(prediction_np, affine=np.eye(4))
+                nib.save(nifti_pred, os.path.join(savepath, f"prediction_{subject}_basic.nii.gz"))
+
+                nifti_target = nib.Nifti1Image(target_np, affine=np.eye(4))
+                nib.save(nifti_target, os.path.join(savepath, f"target_{subject}_basic.nii.gz"))
+
+                # print("Entropy shape:", entropy.shape)
+                # print("Entropy stats: min {:.4f}, max {:.4f}, mean {:.4f}".format(entropy.min().item(), entropy.max().item(), entropy.mean().item()))
+
                 nifti_entropy = nib.Nifti1Image(entropy_np, affine=np.eye(4))
-                nib.save(nifti_entropy, os.path.join(savepath, f"entropy_sample_{i}.nii.gz"))
-                return
+                nib.save(nifti_entropy, os.path.join(savepath, f"entropy_{subject}_basic.nii.gz"))
 
                 
             if i == 0:
@@ -569,7 +598,7 @@ class Trainer(object):
 
     def evaluate(self):
         # performance, mean_perf = self.run_evaluation_new_to_get_variance()
-        performance, mean_perf = self.run_evaluation_new_to_get_variance(basis_model_only=True)
+        performance, mean_perf = self.run_evaluation_new_to_get_variance(basis_model_only=self.model_kwargs['basic'])
 
 
 def run_weighting_grid_search(args):
@@ -698,7 +727,7 @@ def run_basic(args):
     
 def run_basic_eval(args):
     model_kwargs = {
-        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_0_model_epoch_6.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
                         'lambda_ce':1.0,
                         'lambda_dice':1.0,
@@ -707,8 +736,23 @@ def run_basic_eval(args):
                     },
         'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
-        'num_samples_inference': 30
+        'num_samples_inference': 100,
+        'basic': False
     }
+    
+    # model_kwargs = {
+    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+    #     'loss_kwargs': {
+    #                     'lambda_ce':1.0,
+    #                     'lambda_dice':1.0,
+    #                     'lambda_nll': 1.0,
+    #                     'lambda_kl': 1e-4
+    #                 },
+    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'num_samples_train': 5,
+    #     'num_samples_inference': 100,
+    #     'basic': True
+    # }
 
     training_kwargs = {
         'num_epochs': 20,
@@ -725,7 +769,7 @@ def run_basic_eval(args):
                     },
 
         'eval_loader_data_path': '/home/awias/data/pancreas_validation',
-    }
+        }
 
     run_experiment_eval(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
 

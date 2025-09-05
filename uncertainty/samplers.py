@@ -24,6 +24,73 @@ class BaseSampler(nn.Module):
         pass
 
 
+class SamplerMoreProper(BaseSampler):
+
+    def __init__(self, mu, sigma, low_rank_cov, cov_basis_mat, weighting):
+        super().__init__(mu, sigma, low_rank_cov, cov_basis_mat, weighting)
+    
+    def forward(self):
+        
+        """
+        Sample MC logits from a Gaussian with low-rank + diagonal covariance.
+
+        Distribution:
+            logits ~ N(mu, Σ), with
+            Σ = (B diag(a))(B diag(a))^T + diag(sigma^2)
+
+        Args:
+            mu:    [B,C,D,H,W]   mean logits
+            a:     [B,r,D,H,W]   low-rank scales (voxel dependent)
+            sigma: [B,C,D,H,W]   diagonal std dev
+            B:     [C,r]         learned basis matrix (shared across voxels/batch)
+            num_samples: int     number of Monte Carlo samples
+            targets: [B,D,H,W]   (optional) target labels, unused here but kept for API compatibility
+
+        Returns:
+            logits_mc: [K,B,C,D,H,W]   sampled logits
+        """
+        Bsz, C, D, H, W = self.mu.shape
+        r = self.low_rank_cov.shape[1]  # rank
+
+        # -------------------------------------------------------
+        # 1. Expand mean for sampling
+        # -------------------------------------------------------
+        mu_exp = self.mu.unsqueeze(0)  # [K,B,C,D,H,W]
+
+        # -------------------------------------------------------
+        # 2. Low-rank noise component
+        # -------------------------------------------------------
+        # eps_r ~ N(0, I), shape [K,B,r,D,H,W]
+        eps_r = torch.randn(1, Bsz, r, device=self.mu.device, dtype=self.mu.dtype)
+
+        # Scale by 'a': [K,B,r,D,H,W]
+        scaled = eps_r.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * self.low_rank_cov.unsqueeze(0)
+
+        # Reshape to [K,B,r,N] with N = D*H*W
+        N = D * H * W
+        scaled = scaled.view(1, Bsz, r, N)
+
+        # Project into C with B:
+        #   B: [C,r], scaled: [K,B,r,N]
+        #   result: [K,B,C,N]
+        low_rank = torch.matmul(self.cov_basis_mat, scaled)  
+
+        # Reshape back to [K,B,C,D,H,W]
+        low_rank_noise = low_rank.view(1, Bsz, C, D, H, W)
+
+        # -------------------------------------------------------
+        # 3. Diagonal noise component
+        # -------------------------------------------------------
+        eps_diag = torch.randn(1, Bsz, C, D, H, W, device=self.mu.device, dtype=self.mu.dtype)
+        diag_noise = eps_diag * self.sigma.unsqueeze(0)
+
+        # -------------------------------------------------------
+        # 4. Combine all parts
+        # -------------------------------------------------------
+        logits_mc = mu_exp + low_rank_noise + diag_noise
+        return logits_mc.squeeze(0)
+
+
 class SamplerUnweighted(BaseSampler):
 
     def __init__(self, mu, sigma, low_rank_cov, cov_basis_mat, weighting):
@@ -246,7 +313,104 @@ class ConvexSamplerWeighted(BaseSampler):
         return sample
 
 
+class PartitionedBasisSampler(nn.Module):
+    def __init__(self,mu, sigma, low_rank_cov, cov_basis_mat, weighting, num_parts=4):
+        super().__init__()
+        self.C = cov_basis_mat.shape[1]
+        self.rank = cov_basis_mat.shape[-1]
+        self.N = cov_basis_mat.shape[0]
+        self.num_parts = num_parts
 
+        self.B_large = cov_basis_mat
+        self.probs = weighting
+        self.mu = mu
+        self.A = low_rank_cov
+        self.sigma = sigma
+
+    
+    def sample(self, ):
+        return self.forward()
+
+    def partition_tensor(self, A, num_parts=4):
+        """
+        A: [B, Rank, H, W, D]
+        Returns: [B, num_parts**3, Rank, H//num_parts, W//num_parts, D//num_parts]
+        """
+        B, Rank, H, W, D = A.shape
+        assert H % num_parts == 0 and W % num_parts == 0 and D % num_parts == 0, \
+            "Volume dims must be divisible by num_parts"
+
+        h, w, d = H // num_parts, W //num_parts, D // num_parts
+
+        # Reshape into (grid × local size)
+        A_parts = A.reshape(B, Rank,
+                            num_parts, h,
+                            num_parts, w,
+                            num_parts, d)
+
+        # Move grid dims up front: (B, num_parts, num_parts, num_parts, Rank, h, w, d)
+        A_parts = A_parts.permute(0, 2, 4, 6, 1, 3, 5, 7)
+
+        # Merge partitions into a single index: (B, num_parts**3, Rank, h, w, d)
+        A_parts = A_parts.reshape(B, num_parts**3, Rank, h, w, d)
+        return A_parts
+    
+    def forward(self,):
+        """
+        Args:
+            A:     [B, C, rank, H, W, D]   -- scaling coefficients
+            feat:  [B, C, H, W, D]         -- features for basis selection
+            sigma: [B, 1, 1, 1, 1, 1] or scalar noise std
+
+        Returns:
+            samples: [B, C, H, W, D]       -- one MC sample per input
+        """
+
+        B, C, H, W, D = self.mu.shape
+        
+        G = self.num_parts**3
+        probs = self.probs.permute(0, 2, 3, 4, 1).reshape(B, G, self.N)   # [B, G, N]
+        B_sel = torch.einsum("bgn,ncr->bgcr", probs, self.B_large)   # [B, G, C, rank]
+
+
+        """
+        A_parts = (
+            self.A.unfold(-3, H // self.num_parts, H // self.num_parts)
+            .unfold(-2, W // self.num_parts, W // self.num_parts)
+            .unfold(-1, D // self.num_parts, D // self.num_parts)
+        )
+        # Reorder dims -> [B, np, np, np, C, rank, h’, w’, d’]
+        A_parts = A_parts.permute(0, 3, 5, 7, 1, 2, 4, 6, 8)
+
+        # Flatten partitions -> [B, G, C, rank, h’, w’, d’]
+        A_parts = A_parts.reshape(
+            B, self.num_parts**3, C, self.rank,
+            H // self.num_parts, W // self.num_parts, D // self.num_parts
+        )
+        """
+        # ---- 2) Partition A into G blocks ----
+
+        A_parts = self.partition_tensor(self.A)
+        eps_rank = torch.randn_like(A_parts)  # [B, G, Rank, h, w, d]
+        # Project with A
+        proj = A_parts * eps_rank  # elementwise multiply rank dim
+        # Sum over rank with B_sel
+        lowrank_term = torch.einsum("bgcr,bgrhwd->bgchwd", B_sel, proj)
+
+        # ---- 4) Reshape back into full volume ----
+        lowrank_term = lowrank_term.view(B,
+                            self.num_parts, self.num_parts, self.num_parts,
+                            C,
+                            H // self.num_parts, W // self.num_parts, D // self.num_parts)
+
+        lowrank_term = lowrank_term.permute(0, 4, 1, 5, 2, 6, 3, 7) \
+                        .reshape(B, C, H, W, D)
+
+        # ---- 3) Add isotropic diagonal noise ----
+        eps_iso = torch.randn_like(lowrank_term)
+        samples = self.mu + lowrank_term + self.sigma * eps_iso
+    
+        return samples
 
 
 

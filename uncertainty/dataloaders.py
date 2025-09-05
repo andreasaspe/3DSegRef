@@ -6,10 +6,9 @@ from tqdm import tqdm
 
 class HackyEvalLoader(Dataset):
 
-    def __init__(self, path_to_data, old_eval_set = None):
-
+    def __init__(self, path_to_data, old_eval_set = None, recreate = False):
         
-        if old_eval_set is not None:
+        if recreate and old_eval_set is not None:
             self.create_dataset(path_to_data, old_eval_set)
         
         self.path_to_data = path_to_data

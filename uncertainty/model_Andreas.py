@@ -271,6 +271,8 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
 
         logits = None
         loss, loss_attributes = None, None
+        
+        num_samples = self.num_samples_train if self.training else self.num_samples_inference
     
         if not self.evaluate_with_samples:
             if targets is not None:
@@ -279,10 +281,9 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         
         if self.get_variance:
             loss, loss_attributes, mu, variance, entropy = self.online_sampling_and_loss_and_variance(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
-            output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes, variance)
+            output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes, variance, entropy)
             return output
         
-        num_samples = self.num_samples_train if self.training else self.num_samples_inference
 
         if targets is not None:
             loss, loss_attributes, mu =  self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
@@ -382,7 +383,8 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             
             # Stack and compute variance across samples (dim=0)
             stacked_softmax = torch.stack(softmaxed_samples, dim=0)  # shape: [num_samples, 30, 2, 224, 160, 192]
-            entropy = -torch.sum(stacked_softmax * torch.log(stacked_softmax + 1e-8), dim=0)
+            mean_softmax = torch.mean(stacked_softmax, dim=0)
+            entropy = -torch.sum(mean_softmax * torch.log(mean_softmax + 1e-8), dim=1)
             variance = torch.var(stacked_softmax, dim=0)  # shape: [1, 2, 224, 160, 192]
 
             return loss, loss_attributes, prediction, variance, entropy

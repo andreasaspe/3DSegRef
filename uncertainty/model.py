@@ -1,5 +1,4 @@
 import pickle
-
 import torch.nn as nn
 import torch
 import os
@@ -20,7 +19,7 @@ from dataclasses import dataclass
 from typing import Union, Type, List, Tuple, Optional
 from collections import OrderedDict
 from transformers.utils import ModelOutput
-from samplers import SamplerWeighted, SamplerUnweighted, ConvexSamplerWeighted
+from samplers import SamplerWeighted, SamplerUnweighted, ConvexSamplerWeighted, PartitionedBasisSampler, SamplerMoreProper
 
 @dataclass
 class UncertaintyModelOutput(ModelOutput):
@@ -152,11 +151,83 @@ class CovarianceWeightHeadLight(nn.Module):
         
         return weights
 
-class PartitionedCovarianceHead(nn.Module):
-    def __init__(self, in_channels, num_bases, volume_size):
+class PartionedCovHead(nn.Module):
 
-        pass
+    def __init__(self, C, N):
+        super().__init__()
+        # Selector network
+        self.selector = nn.Conv3d(C, N, kernel_size=1)        
+        self.num_parts = 4
+        self._track_chosen_indices = False
+        self.basis_counts = None
+        self.chosen_indices = []
+        self.linear = nn.Linear(N*self.num_parts**3, N*self.num_parts**3)
 
+    def track_chosen_indices(self, track = True):
+        self._track_chosen_indices = track
+        self.chosen_indices = None
+    
+    def gumbel_softmax_sample(self, logits, tau,dim = 1, eps = 1e-20):
+        """
+        Draw a sample from the Gumbel-Softmax distribution (soft)
+        Args:
+            logits: [B, G, N] unnormalized log-probs
+            tau: temperature
+        Returns:
+            y: [B, G, N] soft probabilities summing to 1
+        """
+        U = torch.rand_like(logits)
+        gumbel_noise = -torch.log(-torch.log(U + eps) + eps)
+        y = F.softmax((logits + gumbel_noise) / tau, dim=dim)
+        return y
+
+    def gumbel_softmax(self, logits, tau, dim = 1, hard = True):
+        """
+        Sample from Gumbel-Softmax and optionally discretize to hard one-hot
+        Args:
+            logits: [B, G, N] unnormalized log-probs
+            tau: temperature
+            hard: if True, returns one-hot vector but keeps gradient
+        Returns:
+            y_hard: [B, G, N] hard one-hot (or soft if hard=False)
+            y_soft: [B, G, N] soft probabilities
+        """
+        y_soft = self.gumbel_softmax_sample(logits, tau=tau, dim = dim)
+
+        if hard:
+            # Straight-through trick
+            index = y_soft.argmax(dim=-1, keepdim=True)
+            y_hard = torch.zeros_like(logits).scatter_(-1, index, 1.0)
+            # gradient flows through y_soft
+            y = y_hard - y_soft.detach() + y_soft
+        else:
+            y = y_soft
+
+        return y, y_soft
+
+    def forward(self, x, tau = 0.9):
+        
+        # ---- 1) Select basis per partition ----
+        logits = self.selector(x)  # [B, N, H, W, D]
+        logits = F.adaptive_avg_pool3d(logits, (self.num_parts,)*3)
+        logits = nn.GELU()(logits)
+        B, N, np, _, _ = logits.shape
+
+        logits = self.linear(logits.view(B, -1)).view(B, N, np, np, np)
+        y_hard, y_soft = self.gumbel_softmax(logits, tau, dim=1, hard = True)                         # [B, N, np, np, np]
+        if self._track_chosen_indices:
+            # indices: [B, np, np, np], values in [0, N-1]
+            indices = torch.argmax(y_hard, dim=1).detach().cpu()
+
+            # Flatten and count how many times each basis was used
+            counts = torch.bincount(indices.flatten(), minlength=y_hard.size(1))
+
+            # Option 1: accumulate counts over training
+            if self.basis_counts is None:
+                self.basis_counts = torch.zeros(y_hard.size(1), dtype=torch.long)
+            self.basis_counts += counts
+
+        return y_hard, y_soft
 
 class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
     def __init__(
@@ -252,6 +323,9 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         self.min_logvar, self.max_logvar = -5, 5
         self.evaluate_with_samples = True
         self.sample_type = sample_type
+        self.sigmoid = nn.Sigmoid()
+        self.link_function = nn.Softmax(dim = 1)
+
 
     def forward(self, x, targets = None, reduction = "none", scaler = None):
 
@@ -260,7 +334,7 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             return output
     
         skips = self.encoder(x)
-        mu, log_var_diag, cov_out, weighting = self.decoder(skips)
+        mu, log_var_diag, cov_out, weighting, weighting_soft = self.decoder(skips)
 
         diag_var_out = torch.exp(0.5 * torch.clamp(log_var_diag, self.min_logvar, self.max_logvar))
         if self.decoder.deep_supervision:
@@ -272,11 +346,11 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         if not self.evaluate_with_samples:
             if targets is not None:
                 loss, loss_attributes = self.loss_fn(mu, targets)
-            return UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
+            return UncertaintyModelOutput(self.link_function(mu), cov_out, diag_var_out, logits, loss, loss_attributes)
         
         num_samples = self.num_samples_train if self.training else self.num_samples_inference
         if targets is not None:
-            loss, loss_attributes, mu =  self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
+            loss, loss_attributes, mu =  self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out, weighting=weighting, soft_weighting = weighting_soft, num_samples=num_samples)
         else:
             mu = self.online_sampling(mu, cov_out, diag_var_out, num_samples=num_samples)
             
@@ -303,7 +377,7 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
     def basis_model_only(self, only = True):
         self.evaluate_with_samples = not only
 
-    def online_sampling_and_loss(self, targets, mu, a, sigma, weighting, num_samples, scaler = None):
+    def online_sampling_and_loss(self, targets, mu, a, sigma, weighting, soft_weighting, num_samples, scaler = None):
         
         loss, loss_attributes = 0., {}
 
@@ -313,18 +387,18 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             sample = distribution.sample()
             sample = sample.view(mu.shape)
             if idx == 0:
-                prediction = sample.detach()
+                prediction = F.softmax(sample.detach(), dim = 1)
                 
                 if isinstance(distribution, (ConvexSamplerWeighted, )):
-                    comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting=weighting, cov_basis = self.cov_basis_mat)
+                    comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting=soft_weighting, cov_basis = self.cov_basis_mat)
                 else:
-                    comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting = weighting)
+                    comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting = soft_weighting)
 
                 loss_attributes = {key: 0 for key in sample_attributes.keys()}
             else:
                 comb_loss, sample_attributes = self.loss_fn(sample, targets)
-                prediction+=sample
-            
+                prediction += F.softmax(sample.detach(), dim = 1)
+               
             loss += comb_loss
             loss_attributes = {key: val + sample_attributes[key] for key, val in loss_attributes.items()}
 
@@ -345,6 +419,13 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             return SamplerWeighted(mu, sigma, low_rank_cov= low_rank, cov_basis_mat=basis_matrix, weighting=weighting)
         elif self.sample_type == 'convex':
             return ConvexSamplerWeighted(mu, sigma, low_rank_cov= low_rank, cov_basis_mat=basis_matrix, weighting=weighting)
+        elif self.sample_type == 'partitioned':
+            return PartitionedBasisSampler(mu, sigma, low_rank, basis_matrix, weighting=weighting)
+        elif self.sample_type == 'diagonal':
+            return self.get_independent_torch_distribution(mu, low_rank, sigma, basis_matrix)
+        elif self.sample_type == 'basic_proper':
+            return SamplerMoreProper(mu, sigma, low_rank, basis_matrix, weighting=weighting)
+    
 
     def online_sampling(self, mu, a, sigma,weighting, num_samples):
         
@@ -358,14 +439,20 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
 
     def get_torch_distribution(self, mu, a, sigma, B):
         batch_size, C, D, H, W = mu.shape
-        a = a.transpose(1,2).view(batch_size, self.cov_rank, C, -1).flatten(2,3).transpose(1,2)
+        # a = a.transpose(1,2).view(batch_size, self.cov_rank // 2, -1).transpose(1,2)
     
         dist = torch.distributions.LowRankMultivariateNormal(
             mu.view(batch_size, -1), a.reshape(batch_size, C*D*H*W, self.cov_rank // C), sigma.view(batch_size, -1)
         )
 
         return dist
-            
+    
+    def get_independent_torch_distribution(self, mu, a, sigma, B):
+
+        batch_size, C, D, H, W = mu.shape
+        dist = torch.distributions.Normal(mu.view(batch_size, -1), sigma.view(batch_size, -1))
+        return dist
+                
     def calculate_loss(self, targets, logits_mc, sigma, is_sampled = True):
         
         loss, loss_attributes = 0., {}
@@ -429,8 +516,11 @@ class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
         
         if self.predict_cov_weighting:
             num_bases = cov_weighting_kwargs.get('num_bases', cov_rank)
-            self.cov_weighting_head = CovarianceWeightHeadLight(
-                self.diag_head.in_channels, num_bases, cov_rank
+
+            covariance_head_type = cov_weighting_kwargs.get('class', CovarianceWeightHeadLight)
+            
+            self.cov_weighting_head = covariance_head_type(
+                self.diag_head.in_channels, num_bases
             )
         
         self.return_samples = True
@@ -446,7 +536,7 @@ class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
         """
         lres_input = skips[-1]
         seg_outputs = []
-        diag_var_out, cov_out, cov_weighting = None, None, None
+        diag_var_out, cov_out, cov_weighting, cov_weighting_soft = None, None, None, None
         for s in range(len(self.stages)):
             x = self.transpconvs[s](lres_input)
             x = torch.cat((x, skips[-(s+2)]), 1)
@@ -459,14 +549,14 @@ class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
                     diag_var_out = self.diag_head(x)
                     cov_out = self.cov_head(x)
                     if self.predict_cov_weighting:
-                        cov_weighting = self.cov_weighting_head(x)
+                        cov_weighting, cov_weighting_soft = self.cov_weighting_head(x)
 
             elif s == (len(self.stages) - 1):
                 seg_outputs.append(self.seg_layers[-1](x))
                 diag_var_out = self.diag_head(x)
                 cov_out = self.cov_head(x)
                 if self.predict_cov_weighting:
-                    cov_weighting = self.cov_weighting_head(x)
+                    cov_weighting, cov_weighting_soft = self.cov_weighting_head(x)
 
             lres_input = x
     
@@ -474,9 +564,9 @@ class UnetDecoderWithUncertainty(unet_dec.UNetDecoder):
         seg_outputs = seg_outputs[::-1]
 
         if not self.deep_supervision:
-            return seg_outputs[0], diag_var_out, cov_out, cov_weighting
+            return seg_outputs[0], diag_var_out, cov_out, cov_weighting, cov_weighting_soft
         else:
-            return seg_outputs, diag_var_out, cov_out, cov_weighting
+            return seg_outputs, diag_var_out, cov_out, cov_weighting, cov_weighting_soft
         
 
 
@@ -491,9 +581,9 @@ class MultipleBasisUNetWithUncertainty(UnetWithUncertainty):
 
         if self.sample_type == 'convex':
             self.decoder.cov_weighting_head.top_k = self.num_bases
-        else:
-            self.decoder.cov_weighting_head.top_k = 1
         
+        
+
     
     
 class PPUnetWithUncertainty(UnetWithUncertainty):
@@ -712,7 +802,6 @@ class VariationalLoss(nn.Module):
             orth_loss = self.orthogonal_cov_basis_loss(cov_basis)
             loss += orth_loss * self.lambda_orth
         
-        
         return loss, {'cross_entropy': ce_loss.item(), 'dice': dice_loss.item(), 'kl': kl_loss.item(),
                       'orth': orth_loss.item(), 'weight': weighting_loss.item()}
 
@@ -726,7 +815,7 @@ class VariationalLoss(nn.Module):
         entropy = - (weighting * (weighting + eps).log()).sum(dim=1)  # [B, D, H, W]
 
         # Mean entropy across batch & volume
-        entropy_loss = -entropy.mean()
+        entropy_loss = - entropy.mean()
         return entropy_loss
 
     
@@ -769,8 +858,6 @@ class VariationalLoss(nn.Module):
         cardinality = torch.sum(probs + target_onehot, dims)
         dice = (2. * intersect / (cardinality + eps)).mean()
         return 1. - dice
-
-
 
 
 MODEL_CLASSES = {

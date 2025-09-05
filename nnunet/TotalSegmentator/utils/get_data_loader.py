@@ -147,7 +147,9 @@ def run_training(dataset_name_or_id: Union[str, int],
                  val_with_best: bool = False,
                  device: torch.device = torch.device('cuda'),
                  return_trainer: bool = False,
-                 return_data_loader: bool = False):
+                 return_data_loader: bool = False,
+                 path_to_test = ""):
+    
     if plans_identifier == 'nnUNetPlans':
         print("\n############################\n"
               "INFO: You are using the old nnU-Net default plans. We have updated our recommendations. "
@@ -196,9 +198,10 @@ def run_training(dataset_name_or_id: Union[str, int],
         
         if return_data_loader:
             nnunet_trainer.batch_size = 1
-            dataloader_train, dataloader_val = nnunet_trainer.get_dataloaders()
-            return dataloader_train, dataloader_val
-
+            nnunet_trainer.include_test = True
+            dataloaders = nnunet_trainer.get_dataloaders()
+            return dataloaders
+          
         if disable_checkpointing:
             nnunet_trainer.disable_checkpointing = disable_checkpointing
 
@@ -278,7 +281,7 @@ def run_training_entry():
                  args.num_gpus, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
                  device=device)
 
-def get_data_loader(fold = 0):
+def get_data_loader(fold = 0, path_to_test = ''):
     import argparse
     arg_dict = {
         'dataset_name_or_id': '4',
@@ -295,8 +298,10 @@ def get_data_loader(fold = 0):
         'val_best': "",
         'device': 'cuda',
         'return_trainer': False,
-        'return_data_loader': True
+        'return_data_loader': True,
+        'path_to_test': ''
     }
+
     from argparse import Namespace
     args = Namespace(**arg_dict)
     
@@ -315,7 +320,7 @@ def get_data_loader(fold = 0):
 
     return run_training(args.dataset_name_or_id, args.configuration, args.fold, args.tr, args.p, args.pretrained_weights,
                  args.num_gpus, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
-                 device=device, return_trainer=args.return_trainer, return_data_loader=args.return_data_loader)
+                 device=device, return_trainer=args.return_trainer, return_data_loader=args.return_data_loader, path_to_test = args.path_to_test)
 
 if __name__ == '__main__':
     os.environ['OMP_NUM_THREADS'] = '1'
