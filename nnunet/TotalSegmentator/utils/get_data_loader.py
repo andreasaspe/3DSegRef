@@ -284,7 +284,7 @@ def run_training_entry():
 def get_data_loader(fold = 0, path_to_test = ''):
     import argparse
     arg_dict = {
-        'dataset_name_or_id': '13',
+        'dataset_name_or_id': '4',
         'configuration': '3d_fullres' ,
         'fold': fold,
         'tr': 'nnUNetTrainerNoMirroring',

@@ -442,7 +442,6 @@ class Trainer(object):
 
                 nifti_entropy = nib.Nifti1Image(entropy_np, affine=np.eye(4))
                 nib.save(nifti_entropy, os.path.join(savepath, f"entropy_{subject}_basic.nii.gz"))
-                return
 
                 
             if i == 0:
@@ -727,22 +726,8 @@ def run_basic(args):
     
     
 def run_basic_eval(args):
-    # model_kwargs = {
-    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_0_model_epoch_6.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
-    #     'loss_kwargs': {
-    #                     'lambda_ce':1.0,
-    #                     'lambda_dice':1.0,
-    #                     'lambda_nll': 1.0,
-    #                     'lambda_kl': 1e-4
-    #                 },
-    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-    #     'num_samples_train': 5,
-    #     'num_samples_inference': 30,
-    #     'basic': False
-    # }
-    
     model_kwargs = {
-        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_0_model_epoch_6.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
                         'lambda_ce':1.0,
                         'lambda_dice':1.0,
@@ -751,9 +736,23 @@ def run_basic_eval(args):
                     },
         'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
-        'num_samples_inference': 30,
-        'basic': True
+        'num_samples_inference': 100,
+        'basic': False
     }
+    
+    # model_kwargs = {
+    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+    #     'loss_kwargs': {
+    #                     'lambda_ce':1.0,
+    #                     'lambda_dice':1.0,
+    #                     'lambda_nll': 1.0,
+    #                     'lambda_kl': 1e-4
+    #                 },
+    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'num_samples_train': 5,
+    #     'num_samples_inference': 100,
+    #     'basic': True
+    # }
 
     training_kwargs = {
         'num_epochs': 20,
