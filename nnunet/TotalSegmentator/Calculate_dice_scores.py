@@ -18,8 +18,8 @@ def dice_score(y_true, y_pred, smooth=1e-6):
     intersection = np.sum(y_true * y_pred)
     return (2. * intersection + smooth) / (np.sum(y_true) + np.sum(y_pred) + smooth)
 
-label_gt_path = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/labelsTs"
-label_pred_path = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds"
+label_gt_path = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset006_TotalSegmentatorGallbladder/labelsTs"
+label_pred_path = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset006_TotalSegmentatorGallbladder/imagesTs/man_preds"
 
 label_gt_file = [x for x in os.listdir(label_gt_path) if x.endswith(".nii.gz")]
 label_pred_file = [x for x in os.listdir(label_pred_path) if x.endswith(".nii.gz")]

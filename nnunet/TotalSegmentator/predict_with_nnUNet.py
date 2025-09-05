@@ -13,10 +13,10 @@ import os
 
 def predict_with_nn_unet_on_filelist():
     print("Predict with NN U-Net")
-    model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
+    model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset006_TotalSegmentatorGallbladder/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
 
-    input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds"
+    input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset006_TotalSegmentatorGallbladder/imagesTs"
+    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset006_TotalSegmentatorGallbladder/imagesTs/man_preds"
 
     os.environ["nnUNet_results"] = "/scratch/awias/data/nnUNet_dataset/nnUNet_results"
  
