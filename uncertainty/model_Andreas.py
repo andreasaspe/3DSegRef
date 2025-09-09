@@ -254,7 +254,7 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         self.min_logvar, self.max_logvar = -5, 5
         self.evaluate_with_samples = True
         self.sample_type = sample_type
-        self.get_variance = True
+        self.get_variance = False ########### CHANGE HERE
 
     def forward(self, x, targets = None, reduction = "none", scaler = None):
 
@@ -288,9 +288,10 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         if targets is not None:
             loss, loss_attributes, mu =  self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
         else:
-            mu = self.online_sampling(mu, cov_out, diag_var_out, num_samples=num_samples)
-            
-        output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
+            mu = self.online_sampling(mu, cov_out, diag_var_out,weighting = None, num_samples=num_samples)
+        
+        entropy = self.entropy(mu)
+        output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes, entropy)
         return output
     
     def online_sampling_and_loss_gradient_accum(self, x, targets, scaler):
@@ -343,7 +344,8 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
 
         return loss, loss_attributes, prediction
     
-    
+    def entropy(self, prediction):
+        return -torch.sum(prediction * torch.log(prediction + 1e-8), dim=1)
     
     def online_sampling_and_loss_and_variance(self, targets, mu, a, sigma, weighting, num_samples, scaler = None):
             
@@ -407,7 +409,7 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         distribution = self.get_distribution(mu, a, sigma, self.cov_basis_mat, weighting=weighting)
         
         for idx in range(num_samples):
-            prediction += distribution.sample().view(prediction.shape)
+            prediction += F.softmax(distribution.sample().view(prediction.shape), dim = 1)
         return prediction / num_samples
     
 

@@ -18,6 +18,7 @@ import numpy as np
 from argparse import ArgumentParser, Namespace
 import ast
 from dataloaders import HackyEvalLoader
+import SimpleITK as sitk
 warnings.filterwarnings('ignore', category=UserWarning)
 
 torch.set_num_interop_threads(1)
@@ -377,9 +378,11 @@ class Trainer(object):
             output = self.model(input_volume, target, reduction = 'mean')
 
             savepath_root = "/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/pred"
+            image_root_path = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTr"
             subject = elem['keys'].item()
             # Assuming output.variance is a tensor of shape [1, 2, 224, 160, 192]
             if output.variance is not None:
+                imgpath = os.path.join(image_root_path, subject + "_0000.nii.gz")
                 print("Yay, variance is not None")
                 savepath = os.path.join(savepath_root, "variance")
                 os.makedirs(savepath, exist_ok=True)
@@ -392,14 +395,21 @@ class Trainer(object):
                 #     nib.save(nifti_img, os.path.join(savepath, f"variance_class_{class_idx}_sample_{i}.nii.gz"))
 
                 # Remove batch dimension
+                variance_background = variance[0, 0]
                 variance_foreground = variance[0, 1]
-                nifti_img = nib.Nifti1Image(variance_foreground, affine=np.eye(4))
-                nib.save(nifti_img, os.path.join(savepath, f"variance_{subject}_stochastic.nii.gz"))
+                nifti_variance_foreground = nib.Nifti1Image(variance_foreground, affine=np.eye(4))
+                nifti_variance_background = nib.Nifti1Image(variance_background, affine=np.eye(4))
+                nib.save(nifti_variance_foreground, os.path.join(savepath, f"variance-foreground_{subject}_stochastic.nii.gz"))
+                nib.save(nifti_variance_background, os.path.join(savepath, f"variance-background_{subject}_stochastic.nii.gz"))
 
                 entropy = output.entropy.detach().cpu().numpy().squeeze(0).astype(np.float32)  # shape: (224, 160, 192)
                 prediction_np = output.mu.argmax(1).squeeze(0).detach().cpu().numpy().astype(np.uint8)
                 target_np = target.squeeze(0).detach().cpu().numpy().astype(np.uint8)
                 input_np = input_volume.squeeze(0,1).detach().cpu().numpy().astype(np.float32)
+                logits_np = output.mu.detach().cpu().numpy().squeeze(0).astype(np.float32)
+                logits_background_np = logits_np[0]
+                logits_foreground_np = logits_np[1]
+                
 
                 nifti_input = nib.Nifti1Image(input_np, affine=np.eye(4))
                 nib.save(nifti_input, os.path.join(savepath, f"input_{subject}_stochastic.nii.gz"))
@@ -412,7 +422,14 @@ class Trainer(object):
 
                 nifti_entropy = nib.Nifti1Image(entropy, affine=np.eye(4))
                 nib.save(nifti_entropy, os.path.join(savepath, f"entropy_{subject}_stochastic.nii.gz"))
-                return
+                
+                nifti_logits_foreground = nib.Nifti1Image(logits_foreground_np, affine=np.eye(4))
+                nib.save(nifti_logits_foreground, os.path.join(savepath, f"logits-foreground_{subject}_stochastic.nii.gz"))
+                
+                nifti_logits_background = nib.Nifti1Image(logits_background_np, affine=np.eye(4))
+                nib.save(nifti_logits_background, os.path.join(savepath, f"logits-background_{subject}_stochastic.nii.gz"))
+                
+                
             
             if basis_model_only:
                 print("Yay, variance is not None")
@@ -727,7 +744,7 @@ def run_basic(args):
     
 def run_basic_eval(args):
     model_kwargs = {
-        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_0_model_epoch_6.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
                         'lambda_ce':1.0,
                         'lambda_dice':1.0,
