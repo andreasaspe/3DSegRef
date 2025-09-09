@@ -736,7 +736,7 @@ def run_basic_eval(args):
                     },
         'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
-        'num_samples_inference': 100,
+        'num_samples_inference': 30,
         'basic': False
     }
     
