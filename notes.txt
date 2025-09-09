@@ -2,10 +2,12 @@ export nnUNet_raw="/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_raw"
 export nnUNet_results="/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_results"
 export nnUNet_preprocessed="/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_preprocessed"
 
-
+conda activate nnunet_v2
 export nnUNet_raw="/scratch/awias/data/nnUNet/nnUNet_raw"
 export nnUNet_results="/scratch/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/scratch/awias/data/nnUNet/nnUNet_preprocessed"
+nnUNetv2_train 5 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans --c
+
 
 srun --gres=gpu -c 8 --pty --mem 40g bash
 srun -c 16 --mem=32G --pty bash
