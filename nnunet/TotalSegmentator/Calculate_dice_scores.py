@@ -19,6 +19,7 @@ def dice_score(y_true, y_pred, smooth=1e-6):
     return (2. * intersection + smooth) / (np.sum(y_true) + np.sum(y_pred) + smooth)
 
 label_gt_path = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/labelsTs"
+label_pred_path_deterministic = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds_deterministic"
 label_pred_path = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds"
 
 label_gt_file = [x for x in os.listdir(label_gt_path) if x.endswith(".nii.gz")]
@@ -40,6 +41,7 @@ for subject in all_subjects:
     try:
         mask_gt = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(label_gt_path, f"{subject}.nii.gz")))
         pred = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(label_pred_path, f"{subject}_0000_pred.nii.gz")))
+        pred_deterministic = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(label_pred_path_deterministic, f"{subject}_0000_pred.nii.gz")))
         
         # print(os.path.join(label_gt_path,label_gt_file[i]))
         # print(os.path.join(label_pred_path,label_pred_file[i]))
@@ -47,13 +49,20 @@ for subject in all_subjects:
         
 
         dice = dice_score(mask_gt, pred)
-        dice_list.append(dice)
+        dice_deterministic = dice_score(mask_gt, pred_deterministic)
+
+        dice_diff = dice - dice_deterministic
         
-        print(f"Dice score for subject {subject} is: {dice}")
+        
+        
+        dice_list.append(dice_diff)
+        
+
+        print(f"Dice diff for subject {subject} is: {dice_diff}")
     except:
         print(f"Error processing subject {subject}. Skipping...")
 
-print(f"Mean dice score: {sum(dice_list) / len(dice_list)}")
-print(f"Median dice score: {sorted(dice_list)[len(dice_list) // 2]}")
-print(f"Max dice score: {max(dice_list)}")
-print(f"Min dice score: {min(dice_list)}")
+print(f"Mean dice score: {round(np.mean(dice_list), 3)}")
+print(f"Median dice score: {round(np.median(dice_list), 3)}")
+print(f"Max dice score: {round(np.max(dice_list), 3)}")
+print(f"Min dice score: {round(np.min(dice_list), 3)}")

@@ -172,7 +172,7 @@ class Trainer(object):
     def setup_data(self, ):
         self.train_loader, self.eval_loader = get_data_loader()
 
-        if self.get_eval_loader_from_saved:
+        if self.get_eval_loader_from_saved and False:
             self.eval_loader = HackyEvalLoader(self.get_eval_loader_from_saved)
 
         return self.train_loader, self.eval_loader
