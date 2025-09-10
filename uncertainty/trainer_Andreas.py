@@ -21,6 +21,7 @@ from dataloaders import HackyEvalLoader
 import SimpleITK as sitk
 warnings.filterwarnings('ignore', category=UserWarning)
 
+
 torch.set_num_interop_threads(1)
 def dice_score(prediction, target, smooth = 1e-6, reduction = 'None'):
 

@@ -288,7 +288,10 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         if targets is not None:
             loss, loss_attributes, mu =  self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out, weighting=weighting, num_samples=num_samples)
         else:
-            mu = self.online_sampling(mu, cov_out, diag_var_out,weighting = None, num_samples=num_samples)
+            if os.environ['PREDICT_PIXEL_VARIANCE'] == '1':
+                mu = self.online_sampling_get_variance_for_predicter(mu, cov_out, diag_var_out,weighting = None, num_samples=num_samples)
+            else:
+                mu = self.online_sampling(mu, cov_out, diag_var_out,weighting = None, num_samples=num_samples)
         
         entropy = self.entropy(mu)
         output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes, entropy)
@@ -411,6 +414,26 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         for idx in range(num_samples):
             prediction += F.softmax(distribution.sample().view(prediction.shape), dim = 1)
         return prediction / num_samples
+    
+    def online_sampling_get_variance_for_predicter(self, mu, a, sigma,weighting, num_samples):
+            
+            prediction = torch.zeros_like(mu)
+            distribution = self.get_distribution(mu, a, sigma, self.cov_basis_mat, weighting=weighting)
+                
+            # Compute variance across the samples (after softmax)
+            softmaxed_samples = []
+            for _ in range(num_samples):
+                sample = distribution.sample().view(prediction.shape)
+                softmaxed_sample = F.softmax(sample, dim=1)
+                softmaxed_samples.append(softmaxed_sample)
+            softmaxed = torch.stack(softmaxed_samples, dim=0)
+            variance = torch.var(softmaxed, dim=0)
+            
+            # # Compute variance across the samples (after softmax)
+            # softmaxed = torch.stack([F.softmax(distribution.sample().view(prediction.shape), dim=1) for _ in range(num_samples)], dim=0)
+            # variance = torch.var(softmaxed, dim=0)
+            
+            return variance
     
 
     def get_torch_distribution(self, mu, a, sigma, B):
