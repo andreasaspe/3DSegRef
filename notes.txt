@@ -20,6 +20,13 @@ export nnUNet_results="/home/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/home/awias/data/nnUNet/nnUNet_preprocessed"
 
 
+Terminal overblik
+
+Pancreas1 træner --c PANCREAS (3)
+GallBladder1 træner --c fold PANCREAS (4)
+GallBladder4 træner GALLBLADDER (1)
+
+
 
 
 WARNING: In /tmp/SimpleITK-build/ITK/Modules/IO/NIFTI/src/itkNiftiImageIO.cxx, line 2008
