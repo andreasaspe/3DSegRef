@@ -2,11 +2,11 @@ import numpy as np
 import SimpleITK as sitk
 import os
 from tqdm import tqdm
+import time
 
-
-path_variance = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/variances_preds"
-path_img = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-outputpath = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/variances_nifti" # Output path
+path_variance = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_variance"
+path_img = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs" # For copying image information
+outputpath = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_variance_nifti" # Output path
 
 os.makedirs(outputpath, exist_ok=True)
 
@@ -24,8 +24,17 @@ for subject in tqdm(all_subjects):
     try:
         variance = np.load(os.path.join(path_variance, subject + "_0000_pred_var.nii.gz.npz"))['probabilities'][1] # Get only foreground class
         
-        variance = (variance - np.min(variance)) / (np.max(variance) - np.min(variance)) * 100
-                
+        print(f"Loaded variance for {subject}, shape: {variance.shape}, min: {np.min(variance)}, max: {np.max(variance)}")
+        
+        time.sleep(1)  # Pause for 1 second to ensure the print statement is readable
+        
+        vmin, vmax = np.min(variance), np.max(variance)
+        if vmax > vmin:
+            variance = (variance - vmin) / (vmax - vmin) * 100 #SCALING!
+        else:
+            # variance map is flat → no contrast
+            variance = np.zeros_like(variance)                
+            
         img_sitk = sitk.ReadImage(os.path.join(path_img, subject + "_0000.nii.gz")) # Only for copying information
 
         # print(subject)

@@ -28,28 +28,28 @@ class WrappedModel(nn.Module):
 def get_model():
     
     model_kwargs = {
-        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
                         'lambda_ce':1.0,
                         'lambda_dice':1.0,
                         'lambda_nll': 1.0,
                         'lambda_kl': 1e-4
                     },
-        'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
         'num_samples_inference': 30,
         'basic': False
     }
     
     # model_kwargs = {
-    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+    #     'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
     #     'loss_kwargs': {
     #                     'lambda_ce':1.0,
     #                     'lambda_dice':1.0,
     #                     'lambda_nll': 1.0,
     #                     'lambda_kl': 1e-4
     #                 },
-    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
     #     'num_samples_train': 5,
     #     'num_samples_inference': 100,
     #     'basic': True
@@ -59,7 +59,7 @@ def get_model():
         'num_epochs': 20,
         'lr': 1e-4,
         'weight_decay': 1e-4,
-        'output_dir': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints',
+        'output_dir': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints',
         'num_iterations_per_epoch': 250,
         'num_val_iterations': 5,
         'loss_kwargs': {
@@ -69,7 +69,7 @@ def get_model():
                         'lambda_kl': 1e-4
                     },
 
-        'eval_loader_data_path': '/home/awias/data/pancreas_validation',
+        'eval_loader_data_path': '/scratch/awias/data/pancreas_validation',
         }
     
     trainer = Trainer(model_kwargs, training_kwargs)
@@ -78,13 +78,11 @@ def get_model():
 
 def predict_with_nn_unet_on_filelist():
     print("Predict with NN U-Net")
-    model_folder = "/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
+    model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
 
-    input_data_folder = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-    output_folder = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds_deterministic"
-
-    os.environ["nnUNet_results"] = "/home/awias/data/nnUNet_dataset/nnUNet_results"
- 
+    input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
+    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_variance"
+     
     os.makedirs(output_folder, exist_ok=True)
 
     in_files = []
@@ -94,17 +92,17 @@ def predict_with_nn_unet_on_filelist():
         if file.endswith("nii.gz"):
             subject = file.split(".nii.gz")[0]
             in_files.append([os.path.join(input_data_folder, file)])
-            out_files.append(os.path.join(output_folder, subject + "_pred.nii.gz"))
-    
+            out_files.append(os.path.join(output_folder, subject + "_pred_var.nii.gz"))
+        
     # These have to be set always in my new nnunet format
     os.environ['DO_NOT_USE_SOFTMAX'] = '0'
     os.environ['PREDICT_PIXEL_VARIANCE'] = '0'
-
+    
     print(f"Initializing class")
     # instantiate the nnUNetPredictor
     predictor = nnUNetPredictor(
         tile_step_size=0.5,
-        use_gaussian=True,
+        use_gaussian=False, # Set to false when predicting variances. No smoothing thank you.
         use_mirroring=False,
         perform_everything_on_device=True,
         device=torch.device('cuda', 0),
@@ -121,7 +119,8 @@ def predict_with_nn_unet_on_filelist():
         use_folds=[0],
         checkpoint_name='checkpoint_best.pth',
     )
-    
+
+
 
     # Outcommen everything when you have a probabilistic model
     model = get_model()
@@ -132,8 +131,11 @@ def predict_with_nn_unet_on_filelist():
     os.environ['DO_NOT_USE_SOFTMAX'] = '1' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
     print(f"Predicting from files")
     predictor.list_of_parameters = [model.state_dict()]
-
-
+    # CHANGE THIS IF YOU WANT TO PREDICT VARIANCES
+    os.environ['PREDICT_PIXEL_VARIANCE'] = '1' # ALWAYS SET TO 1
+    
+    # Just for the sake of preventing confusion. No need to set DO_NOT_USE_SOFTMAX to 1 and save_probabilities to True when predicting variances. You can, but it is not necessary anymore. Will also not create predictions.
+    
     predictor.predict_from_files(in_files,
                                      out_files,
                                      save_probabilities=True, overwrite=True, # Set save_probabilities to True if you want to save the softmax maps

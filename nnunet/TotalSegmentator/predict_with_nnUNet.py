@@ -11,7 +11,7 @@ from skimage.measure import label
 from pathlib import Path
 import os
 import torch.nn as nn 
-import sys 
+import sys
 
 sys.path.append("/home/awias/code/3DSegRef/uncertainty")
 from trainer_Andreas import Trainer
@@ -81,7 +81,7 @@ def predict_with_nn_unet_on_filelist():
     model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
 
     input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds_deterministic"
+    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds_stochastic"
 
     os.environ["nnUNet_results"] = "/scratch/awias/data/nnUNet_dataset/nnUNet_results"
  
@@ -95,7 +95,11 @@ def predict_with_nn_unet_on_filelist():
             subject = file.split(".nii.gz")[0]
             in_files.append([os.path.join(input_data_folder, file)])
             out_files.append(os.path.join(output_folder, subject + "_pred.nii.gz"))
-        
+    
+    # These have to be set always in my new nnunet format
+    os.environ['DO_NOT_USE_SOFTMAX'] = '0'
+    os.environ['PREDICT_PIXEL_VARIANCE'] = '0'
+
     print(f"Initializing class")
     # instantiate the nnUNetPredictor
     predictor = nnUNetPredictor(
@@ -117,16 +121,18 @@ def predict_with_nn_unet_on_filelist():
         use_folds=[0],
         checkpoint_name='checkpoint_best.pth',
     )
+    
 
-    # # Outcommen everything when you have a probabilistic model
-    # model = get_model()
-    # predictor.network = model
-    # predictor.network.get_variance = False
-    # predictor.network.to(predictor.device)
-    # predictor.network.eval()
-    # print(f"Predicting from files")
-    # predictor.list_of_parameters = [model.state_dict()]
-    # globals()['do_not_use_softmax'] = False
+    # Should be COMMENTED OUT when using deterministic nnU-Net
+    model = get_model()
+    predictor.network = model
+    predictor.network.get_variance = False
+    predictor.network.to(predictor.device)
+    predictor.network.eval()
+    os.environ['DO_NOT_USE_SOFTMAX'] = '1' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
+    print(f"Predicting from files")
+    predictor.list_of_parameters = [model.state_dict()]
+
 
     predictor.predict_from_files(in_files,
                                      out_files,
