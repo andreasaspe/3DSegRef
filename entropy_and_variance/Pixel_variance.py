@@ -24,9 +24,8 @@ for subject in tqdm(all_subjects):
     try:
         variance = np.load(os.path.join(path_variance, subject + "_0000_pred_var.nii.gz.npz"))['probabilities'][1] # Get only foreground class
         
-        print(f"Loaded variance for {subject}, shape: {variance.shape}, min: {np.min(variance)}, max: {np.max(variance)}")
-        
-        time.sleep(1)  # Pause for 1 second to ensure the print statement is readable
+        # print(f"Loaded variance for {subject}, shape: {variance.shape}, min: {np.min(variance)}, max: {np.max(variance)}")
+        # time.sleep(1)  # Pause for 1 second to ensure the print statement is readable
         
         vmin, vmax = np.min(variance), np.max(variance)
         if vmax > vmin:
