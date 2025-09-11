@@ -20,7 +20,7 @@ def dice_score(y_true, y_pred, smooth=1e-6):
     return (2. * intersection + smooth) / (np.sum(y_true) + np.sum(y_pred) + smooth) * 100
 
 label_gt_path = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/labelsTs"
-label_pred_path_deterministic = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_stochastic_deterministic"
+label_pred_path_deterministic = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_deterministic"
 label_pred_path_stochastic = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_stochastic_multibasis"
 
 label_gt_file = [x for x in os.listdir(label_gt_path) if x.endswith(".nii.gz")]
