@@ -59,9 +59,11 @@ def get_trainer_from_args(dataset_name_or_id: Union[int, str],
 
     # initialize nnunet trainer
     preprocessed_dataset_folder_base = join(nnUNet_preprocessed, maybe_convert_to_dataset_name(dataset_name_or_id))
+
     plans_file = join(preprocessed_dataset_folder_base, plans_identifier + '.json')
     plans = load_json(plans_file)
     dataset_json = load_json(join(preprocessed_dataset_folder_base, 'dataset.json'))
+    
     nnunet_trainer = nnunet_trainer(plans=plans, configuration=configuration, fold=fold,
                                     dataset_json=dataset_json, device=device)
     return nnunet_trainer
@@ -281,10 +283,10 @@ def run_training_entry():
                  args.num_gpus, args.npz, args.c, args.val, args.disable_checkpointing, args.val_best,
                  device=device)
 
-def get_data_loader(fold = 0, path_to_test = ''):
+def get_data_loader(fold = 0, path_to_test = '', dataset_name_or_id = '016'):
     import argparse
     arg_dict = {
-        'dataset_name_or_id': '4',
+        'dataset_name_or_id': dataset_name_or_id,
         'configuration': '3d_fullres' ,
         'fold': fold,
         'tr': 'nnUNetTrainerNoMirroring',

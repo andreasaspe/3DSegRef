@@ -8,12 +8,27 @@ class HackyEvalLoader(Dataset):
 
     def __init__(self, path_to_data, old_eval_set = None, recreate = False):
         
-        if recreate and old_eval_set is not None:
+        if recreate:
+            self.delete_potential_dataset(path_to_data)
             self.create_dataset(path_to_data, old_eval_set)
+
+            assert old_eval_set is not None
         
         self.path_to_data = path_to_data
         self.data_files = [os.path.join(path_to_data, file) for file in os.listdir(path_to_data) if file.endswith('pkl')]
 
+
+    def delete_potential_dataset(self, path_to_data):
+
+        if not os.path.exists(path_to_data):
+            return None
+        
+        currently_existing_files = [os.path.join(path_to_data, file) for file in os.listdir(path_to_data) if file.endswith('.pkl')]
+        for file in currently_existing_files:
+            os.remove(file)
+        
+        print("Removed ", len(currently_existing_files), 'Files from the dataset directory')
+    
     def create_dataset(self, path_to_data, old_eval_set):
         
         if not os.path.isdir(path_to_data):

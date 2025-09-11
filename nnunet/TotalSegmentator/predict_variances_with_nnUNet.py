@@ -14,7 +14,8 @@ import torch.nn as nn
 import sys
 
 sys.path.append("/home/awias/code/3DSegRef/uncertainty")
-from trainer_Andreas import Trainer
+from trainer import Trainer
+from model import PartionedCovHead
 
 class WrappedModel(nn.Module):
     def __init__(self, model):
@@ -27,39 +28,65 @@ class WrappedModel(nn.Module):
     
 def get_model():
     
+    # Best single basis
     model_kwargs = {
-        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
                         'lambda_ce':1.0,
                         'lambda_dice':1.0,
                         'lambda_nll': 1.0,
                         'lambda_kl': 1e-4
                     },
-        'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
         'num_samples_inference': 30,
-        'basic': False
+        'sample_type': 'ours' # Single basis
     }
     
-    # model_kwargs = {
-    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
-    #     'loss_kwargs': {
-    #                     'lambda_ce':1.0,
-    #                     'lambda_dice':1.0,
-    #                     'lambda_nll': 1.0,
-    #                     'lambda_kl': 1e-4
-    #                 },
-    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-    #     'num_samples_train': 5,
-    #     'num_samples_inference': 100,
-    #     'basic': True
-    # }
+    
+    # This is PPT
+    model_kwargs = {
+        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_ppt_run_1_model_epoch_5.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+        'sample_type': 'torch' # PPT
+    }
+
+
+    # This is multi
+    model_kwargs = {
+        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_multi_basis_proper_gumbel_run_1_model_epoch_18.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 5*1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'model_type': 'weighted_basis',
+        'cov_weighting_kwargs': {
+            'num_bases': 3,
+            'sample_type': 'partitioned',
+            'class': PartionedCovHead
+        },
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+    }
+    
+
 
     training_kwargs = {
         'num_epochs': 20,
         'lr': 1e-4,
         'weight_decay': 1e-4,
-        'output_dir': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints',
+        'output_dir': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints',
         'num_iterations_per_epoch': 250,
         'num_val_iterations': 5,
         'loss_kwargs': {
@@ -69,19 +96,20 @@ def get_model():
                         'lambda_kl': 1e-4
                     },
 
-        'eval_loader_data_path': '/home/awias/data/pancreas_validation',
+        'eval_loader_data_path': '/scratch/awias/data/pancreas_validation',
         }
     
     trainer = Trainer(model_kwargs, training_kwargs)
     model = WrappedModel(trainer.model)
     return model
 
+
 def predict_with_nn_unet_on_filelist():
     print("Predict with NN U-Net")
-    model_folder = "/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
+    model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
 
-    input_data_folder = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-    output_folder = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/variances_preds"
+    input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
+    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_variance"
      
     os.makedirs(output_folder, exist_ok=True)
 
@@ -134,16 +162,8 @@ def predict_with_nn_unet_on_filelist():
     # CHANGE THIS IF YOU WANT TO PREDICT VARIANCES
     os.environ['PREDICT_PIXEL_VARIANCE'] = '1' # ALWAYS SET TO 1
     
+    # Just for the sake of preventing confusion. No need to set DO_NOT_USE_SOFTMAX to 1 and save_probabilities to True when predicting variances. You can, but it is not necessary anymore. Will also not create predictions.
     
-    
-    
-    
-    try:
-        if os.environ['PREDICT_PIXEL_VARIANCE'] == '1':
-            os.environ['DO_NOT_USE_SOFTMAX'] = '1' # Not necessary anymore, but we really shouldn't use softmax twice, so this was the old way of doing it. Now I just do it to make sure I'm not getting confused later.
-    except:
-        print("Environment variables are not set. Must mean be predict with a probabilistic model")
-
     predictor.predict_from_files(in_files,
                                      out_files,
                                      save_probabilities=True, overwrite=True, # Set save_probabilities to True if you want to save the softmax maps

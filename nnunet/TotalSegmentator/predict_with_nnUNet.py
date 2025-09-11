@@ -11,10 +11,11 @@ from skimage.measure import label
 from pathlib import Path
 import os
 import torch.nn as nn 
-import sys 
+import sys
 
 sys.path.append("/home/awias/code/3DSegRef/uncertainty")
-from trainer_Andreas import Trainer
+from trainer import Trainer
+from model import PartionedCovHead
 
 class WrappedModel(nn.Module):
     def __init__(self, model):
@@ -27,6 +28,7 @@ class WrappedModel(nn.Module):
     
 def get_model():
     
+    # Best single basis
     model_kwargs = {
         'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
@@ -38,22 +40,46 @@ def get_model():
         'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
         'num_samples_inference': 30,
-        'basic': False
+        'sample_type': 'ours' # Single basis
     }
     
-    # model_kwargs = {
-    #     'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
-    #     'loss_kwargs': {
-    #                     'lambda_ce':1.0,
-    #                     'lambda_dice':1.0,
-    #                     'lambda_nll': 1.0,
-    #                     'lambda_kl': 1e-4
-    #                 },
-    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-    #     'num_samples_train': 5,
-    #     'num_samples_inference': 100,
-    #     'basic': True
-    # }
+    
+    # This is PPT
+    model_kwargs = {
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+        'sample_type': 'torch' # PPT
+    }
+
+
+    # This is multi
+    model_kwargs = {
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 5*1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'model_type': 'weighted_basis',
+        'cov_weighting_kwargs': {
+            'num_bases': 3,
+            'sample_type': 'partitioned',
+            'class': PartionedCovHead
+        },
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+    }
+    
 
     training_kwargs = {
         'num_epochs': 20,
@@ -81,7 +107,7 @@ def predict_with_nn_unet_on_filelist():
     model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
 
     input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds_deterministic"
+    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_stochastic"
 
     os.environ["nnUNet_results"] = "/scratch/awias/data/nnUNet_dataset/nnUNet_results"
  
@@ -95,7 +121,11 @@ def predict_with_nn_unet_on_filelist():
             subject = file.split(".nii.gz")[0]
             in_files.append([os.path.join(input_data_folder, file)])
             out_files.append(os.path.join(output_folder, subject + "_pred.nii.gz"))
-        
+    
+    # These have to be set always in my new nnunet format
+    os.environ['DO_NOT_USE_SOFTMAX'] = '0'
+    os.environ['PREDICT_PIXEL_VARIANCE'] = '0'
+
     print(f"Initializing class")
     # instantiate the nnUNetPredictor
     predictor = nnUNetPredictor(
@@ -117,16 +147,18 @@ def predict_with_nn_unet_on_filelist():
         use_folds=[0],
         checkpoint_name='checkpoint_best.pth',
     )
+    
 
-    # # Outcommen everything when you have a probabilistic model
-    # model = get_model()
-    # predictor.network = model
-    # predictor.network.get_variance = False
-    # predictor.network.to(predictor.device)
-    # predictor.network.eval()
-    # print(f"Predicting from files")
-    # predictor.list_of_parameters = [model.state_dict()]
-    # globals()['do_not_use_softmax'] = False
+    # Should be COMMENTED OUT when using deterministic nnU-Net
+    model = get_model()
+    predictor.network = model
+    predictor.network.get_variance = False
+    predictor.network.to(predictor.device)
+    predictor.network.eval()
+    os.environ['DO_NOT_USE_SOFTMAX'] = '1' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
+    print(f"Predicting from files")
+    predictor.list_of_parameters = [model.state_dict()]
+
 
     predictor.predict_from_files(in_files,
                                      out_files,
