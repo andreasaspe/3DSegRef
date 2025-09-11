@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Union, Type, List, Tuple, Optional
 from collections import OrderedDict
 from transformers.utils import ModelOutput
-from samplers import SamplerWeighted, SamplerUnweighted, ConvexSamplerWeighted, PartitionedBasisSampler, SamplerMoreProper
+from samplers import SamplerWeighted, SamplerUnweighted, ConvexSamplerWeighted, PartitionedBasisSampler, SamplerMoreProper, ProperPartionedSampler
 
 @dataclass
 class UncertaintyModelOutput(ModelOutput):
@@ -30,6 +30,57 @@ class UncertaintyModelOutput(ModelOutput):
     loss: Optional[torch.FloatTensor] = None
     loss_decomp: Optional[dict] = None
 
+
+
+class ConstantScheduler:
+
+    def __init__(self, initial_tau, *args, **kwargs):
+        
+        self.initial_tau = initial_tau
+    
+    def step(self):
+        return self.initial_tau
+    def get_tau(self):
+        return self.initial_tau
+    def reset(self):
+        return None
+
+
+class LinearTauScheduler:
+    def __init__(self, initial_tau: float, min_tau: float, total_steps: int):
+        assert initial_tau > 0, "initial_tau must be > 0"
+        assert min_tau > 0, "min_tau must be > 0"
+        assert initial_tau >= min_tau, "initial_tau must be >= min_tau"
+        assert total_steps > 0, "total_steps must be > 0"
+        
+        self.initial_tau = initial_tau
+        self.min_tau = min_tau
+        self.total_steps = total_steps
+        self.current_step = 0
+
+        # Precompute slope for efficiency
+        self.slope = (initial_tau - min_tau) / total_steps
+
+    def step(self):
+        """Advance one step and return the new tau."""
+        tau = max(
+            self.min_tau,
+            self.initial_tau - self.slope * self.current_step
+        )
+        self.current_step += 1
+        return tau
+
+    def get_tau(self):
+        """Return current tau without stepping."""
+        tau = max(
+            self.min_tau,
+            self.initial_tau - self.slope * self.current_step
+        )
+        return tau
+
+    def reset(self):
+        """Reset the scheduler to start over."""
+        self.current_step = 0
 
 
 
@@ -162,10 +213,10 @@ class PartionedCovHead(nn.Module):
         self.basis_counts = None
         self.chosen_indices = []
         self.linear = nn.Linear(N*self.num_parts**3, N*self.num_parts**3)
-
+        self.tau = 0.3
     def track_chosen_indices(self, track = True):
         self._track_chosen_indices = track
-        self.chosen_indices = None
+        self.basis_counts = None
     
     def gumbel_softmax_sample(self, logits, tau,dim = 1, eps = 1e-20):
         """
@@ -205,7 +256,7 @@ class PartionedCovHead(nn.Module):
 
         return y, y_soft
 
-    def forward(self, x, tau = 0.9):
+    def forward(self, x):
         
         # ---- 1) Select basis per partition ----
         logits = self.selector(x)  # [B, N, H, W, D]
@@ -214,7 +265,11 @@ class PartionedCovHead(nn.Module):
         B, N, np, _, _ = logits.shape
 
         logits = self.linear(logits.view(B, -1)).view(B, N, np, np, np)
-        y_hard, y_soft = self.gumbel_softmax(logits, tau, dim=1, hard = True)                         # [B, N, np, np, np]
+        #y_hard, y_soft = self.gumbel_softmax(logits, tau, dim=1, hard = self.hard)                         # [B, N, np, np, np]
+
+        y_hard = F.softmax(logits / self.tau, dim = 1) 
+        y_soft = y_hard 
+
         if self._track_chosen_indices:
             # indices: [B, np, np, np], values in [0, N-1]
             indices = torch.argmax(y_hard, dim=1).detach().cpu()
@@ -392,7 +447,7 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
                 if isinstance(distribution, (ConvexSamplerWeighted, )):
                     comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting=soft_weighting, cov_basis = self.cov_basis_mat)
                 else:
-                    comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting = soft_weighting)
+                    comb_loss, sample_attributes = self.loss_fn(sample, targets, torch.log(sigma), weighting = soft_weighting, cov_basis = self.cov_basis_mat)
 
                 loss_attributes = {key: 0 for key in sample_attributes.keys()}
             else:
@@ -425,7 +480,10 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             return self.get_independent_torch_distribution(mu, low_rank, sigma, basis_matrix)
         elif self.sample_type == 'basic_proper':
             return SamplerMoreProper(mu, sigma, low_rank, basis_matrix, weighting=weighting)
-    
+        elif self.sample_type == 'partitioned_proper':
+            return ProperPartionedSampler(mu, sigma, low_rank, basis_matrix, weighting=weighting)
+        else:
+            raise NotImplementedError(f"Unknown sampler: {self.sample_type}")
 
     def online_sampling(self, mu, a, sigma,weighting, num_samples):
         
@@ -441,9 +499,14 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         batch_size, C, D, H, W = mu.shape
         # a = a.transpose(1,2).view(batch_size, self.cov_rank // 2, -1).transpose(1,2)
     
+        # dist = torch.distributions.LowRankMultivariateNormal(
+        #     mu.view(batch_size, -1), a.permute(0,2,3,4,1).reshape(batch_size, D*H*W, self.cov_rank), sigma.view(batch_size, -1)
+        # )
+
         dist = torch.distributions.LowRankMultivariateNormal(
             mu.view(batch_size, -1), a.reshape(batch_size, C*D*H*W, self.cov_rank // C), sigma.view(batch_size, -1)
         )
+        
 
         return dist
     
@@ -765,8 +828,8 @@ class VariationalLoss(nn.Module):
                  lambda_nll=1.0,
                  lambda_kl=1e-4,
                  smooth=1e-6,
-                 lambda_weight = 0.2,
-                 lambda_orth = 0.1,
+                 lambda_weight = 0.1,
+                 lambda_orth = 1,
                  reduction="mean",
                  num_total = 100,
                  **kwargs):
@@ -812,7 +875,7 @@ class VariationalLoss(nn.Module):
         """
         # Add small epsilon to avoid log(0)
         eps = 1e-8
-        entropy = - (weighting * (weighting + eps).log()).sum(dim=1)  # [B, D, H, W]
+        entropy = - (weighting * (weighting + eps).log()).sum(dim=1)  
 
         # Mean entropy across batch & volume
         entropy_loss = - entropy.mean()
@@ -871,7 +934,8 @@ def get_model_from_base_kwargs(path_to_base, **kwargs):
     base_kwargs['loss_kwargs'] = kwargs.pop('loss_kwargs', dict())
     
     model_class_name = kwargs.pop('model_type', 'standard_uncertainty')
-    
+    print(model_class_name)
+    print(kwargs)
     model_class = MODEL_CLASSES[model_class_name]
     for key, val in kwargs.items():
         base_kwargs[key] = val

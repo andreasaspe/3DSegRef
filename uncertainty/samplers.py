@@ -411,6 +411,62 @@ class PartitionedBasisSampler(nn.Module):
         samples = self.mu + lowrank_term + self.sigma * eps_iso
     
         return samples
+    
+
+class ProperPartionedSampler(PartitionedBasisSampler):
+
+    def __init__(self, mu, sigma, low_rank_cov, cov_basis_mat, weighting, num_parts=4):
+        super().__init__(mu, sigma, low_rank_cov, cov_basis_mat, weighting, num_parts)
+
+    
+    def forward(self, ):
+        
+        B, C, H, W, D = self.mu.shape
+        
+        G = self.num_parts**3
+        probs = self.probs.permute(0, 2, 3, 4, 1).reshape(B, G, self.N)   # [B, G, N]
+        B_sel = torch.einsum("bgn,ncr->bgcr", probs, self.B_large)   # [B, G, C, rank]
+
+        """
+        A_parts = (
+            self.A.unfold(-3, H // self.num_parts, H // self.num_parts)
+            .unfold(-2, W // self.num_parts, W // self.num_parts)
+            .unfold(-1, D // self.num_parts, D // self.num_parts)
+        )
+        # Reorder dims -> [B, np, np, np, C, rank, h’, w’, d’]
+        A_parts = A_parts.permute(0, 3, 5, 7, 1, 2, 4, 6, 8)
+
+        # Flatten partitions -> [B, G, C, rank, h’, w’, d’]
+        A_parts = A_parts.reshape(
+            B, self.num_parts**3, C, self.rank,
+            H // self.num_parts, W // self.num_parts, D // self.num_parts
+        )
+        """
+        # ---- 2) Partition A into G blocks ----
+
+        A_parts = self.partition_tensor(self.A)
+        #eps_rank = torch.randn_like(A_parts)  # [B, G, Rank, h, w, d]
+        eps_rank = torch.rand(1,1,self.rank, 1,1,1, dtype = self.mu.dtype, device = self.mu.device)
+
+        # Project with A
+        proj = A_parts * eps_rank  # elementwise multiply rank dim
+        # Sum over rank with B_sel
+        lowrank_term = torch.einsum("bgcr,bgrhwd->bgchwd", B_sel, proj)
+
+        # ---- 4) Reshape back into full volume ----
+        lowrank_term = lowrank_term.view(B,
+                            self.num_parts, self.num_parts, self.num_parts,
+                            C,
+                            H // self.num_parts, W // self.num_parts, D // self.num_parts)
+
+        lowrank_term = lowrank_term.permute(0, 4, 1, 5, 2, 6, 3, 7) \
+                        .reshape(B, C, H, W, D)
+
+        # ---- 3) Add isotropic diagonal noise ----
+        eps_iso = torch.randn_like(lowrank_term)
+        samples = self.mu + lowrank_term + self.sigma * eps_iso
+    
+        return samples
 
 
 

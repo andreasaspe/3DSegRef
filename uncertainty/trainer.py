@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 from tqdm import tqdm
 
-from model import UnetWithUncertainty, get_model_from_base_kwargs
+from model import UnetWithUncertainty, get_model_from_base_kwargs, LinearTauScheduler, ConstantScheduler
 import os
 from torch.amp import autocast, GradScaler
 import sys
@@ -18,6 +18,9 @@ import numpy as np
 from argparse import ArgumentParser, Namespace
 import ast
 from dataloaders import HackyEvalLoader
+
+import ast
+import copy
 
 warnings.filterwarnings('ignore', category=UserWarning)
 
@@ -137,10 +140,16 @@ class Trainer(object):
         self.get_eval_loader_from_saved = training_kwargs.get('eval_loader_data_path', "")
         self.get_test_loader_from_saved = training_kwargs.get('test_loader_data_path', "")
 
+        self.recreate_dataset = training_kwargs.pop('recreate_dataset', False)
+        self.dataset_name_or_id = self.model_kwargs.pop('dataset_name_or_id')
         self.train_loader, self.eval_loader, self.num_batches_train, self.num_batches_eval = (
             None, None, 100, 100
         )
 
+        self.tau_scheduler = None
+        if training_kwargs.get('tau_schedule', False):
+            self.tau_scheduler = None
+        
         self.output_dir = training_kwargs['output_dir']
         print(self.output_dir)
         self.prepare_output_dir()
@@ -177,7 +186,7 @@ class Trainer(object):
 
     def setup_data(self, ):
 
-        dataloaders = get_data_loader()
+        dataloaders = get_data_loader(dataset_name_or_id = self.dataset_name_or_id)
         self.test_loader = None
         if len(dataloaders) == 3:
             self.train_loader, self.eval_loader, self.test_loader = dataloaders
@@ -185,10 +194,10 @@ class Trainer(object):
             self.train_loader, self.eval_loader = dataloaders
 
         if self.get_eval_loader_from_saved:
-            self.eval_loader = HackyEvalLoader(self.get_eval_loader_from_saved)
+            self.eval_loader = HackyEvalLoader(self.get_eval_loader_from_saved,self.eval_loader, recreate=self.recreate_dataset)
             
-        if self.get_test_loader_from_saved and self.test_loader is not None:
-            self.test_loader = HackyEvalLoader(self.get_test_loader_from_saved, self.test_loader, recreate=False)
+        if self.get_test_loader_from_saved:
+            self.test_loader = HackyEvalLoader(self.get_test_loader_from_saved, self.test_loader, recreate=self.recreate_dataset)
         
         return self.train_loader, self.eval_loader, self.test_loader
 
@@ -206,7 +215,10 @@ class Trainer(object):
         else:
             print("Starting from checkpoint {}".format(checkpoint_path))
             own_state_dict = model.state_dict()
-            pretrained_state_dict = torch.load(checkpoint_path, weights_only=False)['network_weights']
+            pretrained_state_dict = torch.load(checkpoint_path, weights_only=False)
+            
+            if 'network_weights' in pretrained_state_dict:
+                pretrained_state_dict = pretrained_state_dict['network_weights']
 
             if any('decoder.encoder' in key for key in own_state_dict.keys()):
                 new_state_dict = {}
@@ -307,8 +319,9 @@ class Trainer(object):
         ce_forward = nn.CrossEntropyLoss()
         
         if hasattr(self.model.decoder, 'cov_weighting_head'):
-            self.model.decoder.cov_weighting_head.track_chosen_indices()
-
+            self.model.decoder.cov_weighting_head.track_chosen_indices(True)
+            self.model.decoder.cov_weighting_head.hard = False
+        
         results = {'dice_score': [], 'NLL':[]}
         for i in range(num_eval_steps):
             elem = eval_loader[i]
@@ -345,6 +358,7 @@ class Trainer(object):
                     )
                 }
             
+            self.model.decoder.cov_weighting_head.hard = False            
             self.model.decoder.cov_weighting_head.track_chosen_indices(False)
         
             print(metrics['basis_indices'])
@@ -546,11 +560,74 @@ def run_weighting_grid_search(args):
 
 
 def run_experiment(model_kwargs, training_kwargs, experiment_name, num_runs = 1):
-    
+
+    import copy
     for i in range(num_runs):
-        trainer = Trainer(model_kwargs=model_kwargs, training_kwargs=training_kwargs)
+        model_kwargs_, training_kwargs_ = copy.deepcopy(model_kwargs), copy.deepcopy(training_kwargs)
+        trainer = Trainer(model_kwargs=model_kwargs_, training_kwargs=training_kwargs_)
         trainer.train(experiment_name=f"{experiment_name}_run_{i}")
         trainer.finalize()
+
+def get_trainer(model_kwargs, training_kwargs):
+    trainer = Trainer(model_kwargs=model_kwargs, training_kwargs=training_kwargs)
+    return trainer
+
+
+
+
+DATASET_TO_PATHS = {
+    'pancreas': {'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+                 'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+                 'dataset_name_or_id': '004'},
+    'gallbladder': {'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset006_TotalSegmentatorGallbladder/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+                 'path_to_base': '/scratch/awias/data/nnUNet/info_dict_6.pkl',
+                 'dataset_name_or_id': '016'},
+    'duodenum': {'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset009_TotalSegmentatorDuodenum/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+                 'path_to_base': '/scratch/awias/data/nnUNet/info_dict_9.pkl', 
+                 'dataset_name_or_id': '019'},
+    'adrenal_left': {'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset007_TotalSegmentatorAdrenal_gland_left/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+                 'path_to_base': '/scratch/awias/data/nnUNet/info_dict_7.pkl', 
+                 'dataset_name_or_id': '017'}
+    }
+
+
+DATASET_TO_SAVE_PATHS = {
+    'pancreas': {'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+                 'test_loader_data_path': '/scratch/pjtka/pancreas_test'},
+    'gallbladder': {'eval_loader_data_path': '/scratch/pjtka/gallbladder_validation',
+                    'test_loader_data_path': '/scratch/pjtka/gallbladder_test'},
+
+    'duodenum': {'eval_loader_data_path': '/scratch/pjtka/duodenum_validation',
+                   'test_loader_data_path': '/scratch/pjtka/duodenum_test'},
+    
+    'adrenal_left': {'eval_loader_data_path': '/scratch/pjtka/adrenal_left_validation',
+                   'test_loader_data_path': '/scratch/pjtka/duodenum_left_test'}
+}
+
+
+def get_model_kwargs_from_dataset(dataset, current_kwargs):
+    
+    from pprint import pprint
+    dataset_specifics = DATASET_TO_PATHS[dataset]
+    for key, val in dataset_specifics.items():
+        current_kwargs[key] = val 
+    
+    print("Using the following paths")
+    pprint(dataset_specifics)
+
+    return current_kwargs
+
+def get_training_kwargs_from_dataset(dataset, current_kwargs):
+
+    from pprint import pprint
+    dataset_specifics = DATASET_TO_SAVE_PATHS[dataset]
+    for key, val in dataset_specifics.items():
+        current_kwargs[key] = val 
+    
+    print("Using the following paths")
+    pprint(dataset_specifics)
+
+    return current_kwargs
 
 
 def run_ppt(args):
@@ -568,6 +645,7 @@ def run_ppt(args):
         'sample_type': 'torch'
     }
 
+    model_kwargs = get_model_kwargs_from_dataset(args.dataset, model_kwargs)
     training_kwargs = {
         'num_epochs': 20,
         'lr': 1e-4,
@@ -584,7 +662,10 @@ def run_ppt(args):
         
         'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
         'test_loader_data_path': '/scratch/pjtka/pancreas_test',
+        'recreate_dataset': args.recreate
     }
+
+    training_kwargs = get_training_kwargs_from_dataset(args.dataset, training_kwargs)
 
     run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
     
@@ -603,6 +684,7 @@ def run_diag(args):
         'num_samples_inference': 30,
         'sample_type': 'diagonal'
     }
+    model_kwargs = get_model_kwargs_from_dataset(args.dataset, model_kwargs)
     
     training_kwargs = {
         'num_epochs': 20,
@@ -620,9 +702,10 @@ def run_diag(args):
         
         'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
         'test_loader_data_path': '/scratch/pjtka/pancreas_test',
+        'recreate_dataset': args.recreate
     }
 
-
+    training_kwargs = get_training_kwargs_from_dataset(args.dataset, training_kwargs)
     run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
     
 
@@ -640,9 +723,26 @@ def run_basic(args):
         'num_samples_train': 5,
         'num_samples_inference': 30,
         'cov_weighting_kwargs': {
-            'sample_type': 'basic_proper'
+            'sample_type': 'ours' if not args.proper else 'basic_proper'
         }
     }
+
+    model_kwargs = {
+        'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset006_TotalSegmentatorGallbladder/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_6.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+        'cov_weighting_kwargs': {
+        }
+    }
+
+    model_kwargs = get_model_kwargs_from_dataset(args.dataset, model_kwargs)
 
     training_kwargs = {
         'num_epochs': 20,
@@ -658,9 +758,12 @@ def run_basic(args):
                         'lambda_kl': 1e-4
                     },
         
-        'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
-        'test_loader_data_path': '/scratch/pjtka/pancreas_test',
+        'eval_loader_data_path': '/scratch/pjtka/gallbladder_validation',
+        'test_loader_data_path': '/scratch/pjtka/gallbladder_test',
+        'recreate_dataset': args.recreate
     }
+    
+    training_kwargs = get_training_kwargs_from_dataset(args.dataset, training_kwargs)
 
     run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
 
@@ -681,13 +784,15 @@ def run_multiple_bases(args):
         'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'model_type': 'weighted_basis',
         'cov_weighting_kwargs': {
-            'num_bases': 2,
-            'sample_type': 'partitioned',
+            'num_bases': 3,
+            'sample_type': 'partitioned' if not args.proper else 'partitioned_proper',
             'class': PartionedCovHead
         },
         'num_samples_train': 5,
         'num_samples_inference': 30
     }
+
+    model_kwargs = get_model_kwargs_from_dataset(args.dataset, model_kwargs)
 
     training_kwargs = {
         'num_epochs': 20,
@@ -703,13 +808,68 @@ def run_multiple_bases(args):
                         'lambda_kl': 1e-4
                     },
 
+        'tau_schedule': {'type': 'constant', 'max': 2, 'min': 0.1},
+
         'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
         'test_loader_data_path': '/scratch/pjtka/pancreas_test',
-        'gradient_accumulation': False
+        'gradient_accumulation': False,
+        'recreate_dataset': args.recreate
     }
 
-
+    training_kwargs = get_training_kwargs_from_dataset(args.dataset, training_kwargs)
     run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
+
+
+def run_multiple_bases_multiple_partitions(args):
+    from model import PartionedCovHead
+
+    base_args = copy.deepcopy(args)
+    for num_bases in [2,4,5]:
+        args = copy.deepcopy(base_args)
+        args.exp_name = f"{args.exp_name}_num_bases_{num_bases}"        
+        model_kwargs = {
+            'checkpoint_path': '/scratch/pjtka/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+            'loss_kwargs': {
+                            'lambda_ce':1.0,
+                            'lambda_dice':1.0,
+                            'lambda_nll': 1.0,
+                            'lambda_kl': 5*1e-4
+                        },
+            'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+            'model_type': 'weighted_basis',
+            'cov_weighting_kwargs': {
+                'num_bases': num_bases,
+                'sample_type': 'partitioned' if not args.proper else 'partitioned_proper',
+                'class': PartionedCovHead
+            },
+            'num_samples_train': 5,
+            'num_samples_inference': 30
+        }
+
+        model_kwargs = get_model_kwargs_from_dataset(args.dataset, model_kwargs)
+
+        training_kwargs = {
+            'num_epochs': 20,
+            'lr': 1e-4,
+            'weight_decay': 1e-4,
+            'output_dir': args.outdir,
+            'num_iterations_per_epoch': 250,
+            'num_val_iterations': 5,
+            'loss_kwargs': {
+                            'lambda_ce': 1.0,
+                            'lambda_dice': 1.0,
+                            'lambda_nll': 1.0,
+                            'lambda_kl': 1e-4
+                        },
+
+            'eval_loader_data_path': '/scratch/pjtka/pancreas_validation',
+            'test_loader_data_path': '/scratch/pjtka/pancreas_test',
+            'gradient_accumulation': False,
+            'recreate_dataset': args.recreate
+        }
+
+        training_kwargs = get_training_kwargs_from_dataset(args.dataset, training_kwargs)
+        run_experiment(model_kwargs=model_kwargs, training_kwargs=training_kwargs, experiment_name=args.exp_name, num_runs = args.num_runs)
 
 
 if __name__ == '__main__':
@@ -719,6 +879,10 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type = str, default='basic', nargs="+")
     parser.add_argument('--num_runs', type = int, default=1)
     parser.add_argument('--outdir', type = str, default='/scratch/pjtka/ndseg_output', nargs="+")
+    parser.add_argument('--recreate', default=False, type = ast.literal_eval)
+    parser.add_argument('--dataset', type = str, default='gallbladder')
+    parser.add_argument('--proper', type = ast.literal_eval, default=False)
+
     args = parser.parse_args()
 
     print(args)
@@ -728,20 +892,24 @@ if __name__ == '__main__':
         'grid': run_weighting_grid_search,
         'multi_basis': run_multiple_bases,
         'ppt': run_ppt,
-        'diag': run_diag
+        'diag': run_diag,
+        'num_bases': run_multiple_bases_multiple_partitions
     }
     assert len(args.exp_type) == len(args.exp_name), 'We require new name for each experiment type otherwise it will overwrite'
 
     if not isinstance(args.outdir, list):
         args.outdir = [args.outdir]
+
+    
+    args.recreate = [args.recreate] + [False] * (len(args.exp_type) -1)
     
     if len(args.outdir) == 1:
         args.outdir = args.outdir * len(args.exp_type)
 
-    iterator = zip(args.exp_type, args.exp_name, args.outdir)
+    iterator = zip(args.exp_type, args.exp_name, args.outdir, args.recreate)
     
-    for exp_type, exp_name, outdir in iterator:
-        run_args = Namespace(**{'exp_type': exp_type, 'exp_name': exp_name, 'outdir': outdir, 'num_runs': args.num_runs})
+    for exp_type, exp_name, outdir, recreate in iterator:
+        run_args = Namespace(**{'exp_type': exp_type, 'exp_name': exp_name, 'outdir': outdir, 'num_runs': args.num_runs, 'dataset': args.dataset, 'recreate': recreate, 'proper': args.proper})
         exp_type_to_func[exp_type](run_args)    
     
         
