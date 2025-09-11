@@ -286,11 +286,7 @@ def run_training_entry():
 def get_data_loader(fold = 0, path_to_test = '', dataset_name_or_id = '016'):
     import argparse
     arg_dict = {
-<<<<<<< HEAD
         'dataset_name_or_id': dataset_name_or_id,
-=======
-        'dataset_name_or_id': '4',
->>>>>>> 9ad7715a17d9c26fd9d2d5648336cad78f09faf3
         'configuration': '3d_fullres' ,
         'fold': fold,
         'tr': 'nnUNetTrainerNoMirroring',
