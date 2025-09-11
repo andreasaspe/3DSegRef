@@ -81,10 +81,8 @@ def predict_with_nn_unet_on_filelist():
     model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
 
     input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs/man_preds_stochastic"
-
-    os.environ["nnUNet_results"] = "/scratch/awias/data/nnUNet_dataset/nnUNet_results"
- 
+    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_variance"
+     
     os.makedirs(output_folder, exist_ok=True)
 
     in_files = []
@@ -94,17 +92,17 @@ def predict_with_nn_unet_on_filelist():
         if file.endswith("nii.gz"):
             subject = file.split(".nii.gz")[0]
             in_files.append([os.path.join(input_data_folder, file)])
-            out_files.append(os.path.join(output_folder, subject + "_pred.nii.gz"))
-    
+            out_files.append(os.path.join(output_folder, subject + "_pred_var.nii.gz"))
+        
     # These have to be set always in my new nnunet format
     os.environ['DO_NOT_USE_SOFTMAX'] = '0'
     os.environ['PREDICT_PIXEL_VARIANCE'] = '0'
-
+    
     print(f"Initializing class")
     # instantiate the nnUNetPredictor
     predictor = nnUNetPredictor(
         tile_step_size=0.5,
-        use_gaussian=True,
+        use_gaussian=False, # Set to false when predicting variances. No smoothing thank you.
         use_mirroring=False,
         perform_everything_on_device=True,
         device=torch.device('cuda', 0),
@@ -121,9 +119,10 @@ def predict_with_nn_unet_on_filelist():
         use_folds=[0],
         checkpoint_name='checkpoint_best.pth',
     )
-    
 
-    # Should be COMMENTED OUT when using deterministic nnU-Net
+
+
+    # Outcommen everything when you have a probabilistic model
     model = get_model()
     predictor.network = model
     predictor.network.get_variance = False
@@ -132,8 +131,11 @@ def predict_with_nn_unet_on_filelist():
     os.environ['DO_NOT_USE_SOFTMAX'] = '1' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
     print(f"Predicting from files")
     predictor.list_of_parameters = [model.state_dict()]
-
-
+    # CHANGE THIS IF YOU WANT TO PREDICT VARIANCES
+    os.environ['PREDICT_PIXEL_VARIANCE'] = '1' # ALWAYS SET TO 1
+    
+    # Just for the sake of preventing confusion. No need to set DO_NOT_USE_SOFTMAX to 1 and save_probabilities to True when predicting variances. You can, but it is not necessary anymore. Will also not create predictions.
+    
     predictor.predict_from_files(in_files,
                                      out_files,
                                      save_probabilities=True, overwrite=True, # Set save_probabilities to True if you want to save the softmax maps
