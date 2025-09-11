@@ -20,11 +20,25 @@ export nnUNet_results="/home/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/home/awias/data/nnUNet/nnUNet_preprocessed"
 
 
+CUDA_VISIBLE_DEVICES=3
+
+
 Terminal overblik
 
-Pancreas1 træner --c PANCREAS (3)
-GallBladder1 træner --c fold PANCREAS (4)
-GallBladder4 træner GALLBLADDER (1)
+Pancreas1 træner GALLBLADDER (1) --c
+Pancreas2 træner GALLBLADDER (2)
+Pancreas4 træner GALLBLADDER (3)
+
+
+Pancreas (1) er ish færdigtrænet
+Pancreas (2) er ish færdigtrænet
+Pancreas (3) er ish færdigtrænet
+Pancreas (4) er ish færdigtrænet
+
+
+dette står i export_prediction.py under inference
+    if globals().get('do_not_use_softmax', False):
+        label_manager.inference_nonlin = lambda x: x
 
 
 
