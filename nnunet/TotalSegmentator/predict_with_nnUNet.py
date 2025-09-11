@@ -133,7 +133,7 @@ def predict_with_nn_unet_on_filelist():
     output_folder_root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions"
     
     # Change folder name
-    foldername = "man_preds_stochastic_deterministic" #CHANGE HERE
+    foldername = "man_preds_deterministic" #CHANGE HERE
     output_folder = os.path.join(output_folder_root, foldername)
     
     
@@ -198,7 +198,7 @@ def predict_with_nn_unet_on_filelist():
     predictor.network.get_variance = False
     predictor.network.to(predictor.device)
     predictor.network.eval()
-    os.environ['DO_NOT_USE_SOFTMAX'] = '0' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
+    os.environ['DO_NOT_USE_SOFTMAX'] = '1' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
     print(f"Predicting from files")
     predictor.list_of_parameters = [model.state_dict()]
 
