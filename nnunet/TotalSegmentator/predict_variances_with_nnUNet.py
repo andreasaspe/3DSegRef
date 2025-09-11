@@ -28,48 +28,50 @@ class WrappedModel(nn.Module):
     
 def get_model():
     
-    # Best single basis
-    model_kwargs = {
-        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
-        'loss_kwargs': {
-                        'lambda_ce':1.0,
-                        'lambda_dice':1.0,
-                        'lambda_nll': 1.0,
-                        'lambda_kl': 1e-4
-                    },
-        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-        'num_samples_train': 5,
-        'num_samples_inference': 30,
-        'sample_type': 'ours' # Single basis
-    }
+    # # Best single basis
+    # model_kwargs = {
+    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+    #     'loss_kwargs': {
+    #                     'lambda_ce':1.0,
+    #                     'lambda_dice':1.0,
+    #                     'lambda_nll': 1.0,
+    #                     'lambda_kl': 1e-4
+    #                 },
+    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'num_samples_train': 5,
+    #     'num_samples_inference': 30,
+    #     'sample_type': 'ours', # Single basis
+    #     'dataset_name_or_id': '4'
+    # }
     
     
-    # This is PPT
-    model_kwargs = {
-        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_ppt_run_1_model_epoch_5.pth',
-        'loss_kwargs': {
-                        'lambda_ce':1.0,
-                        'lambda_dice':1.0,
-                        'lambda_nll': 1.0,
-                        'lambda_kl': 1e-4
-                    },
-        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-        'num_samples_train': 5,
-        'num_samples_inference': 30,
-        'sample_type': 'torch' # PPT
-    }
+    # # This is PPT
+    # model_kwargs = {
+    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_ppt_run_1_model_epoch_5.pth',
+    #     'loss_kwargs': {
+    #                     'lambda_ce':1.0,
+    #                     'lambda_dice':1.0,
+    #                     'lambda_nll': 1.0,
+    #                     'lambda_kl': 1e-4
+    #                 },
+    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'num_samples_train': 5,
+    #     'num_samples_inference': 30,
+    #     'sample_type': 'torch',  # PPT
+    #     'dataset_name_or_id': '4'
+    # }
 
 
     # This is multi
     model_kwargs = {
-        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_multi_basis_proper_gumbel_run_1_model_epoch_18.pth',
+        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_multi_basis_proper_gumbel_run_1_model_epoch_18.pth',
         'loss_kwargs': {
                         'lambda_ce':1.0,
                         'lambda_dice':1.0,
                         'lambda_nll': 1.0,
                         'lambda_kl': 5*1e-4
                     },
-        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'model_type': 'weighted_basis',
         'cov_weighting_kwargs': {
             'num_bases': 3,
@@ -78,15 +80,15 @@ def get_model():
         },
         'num_samples_train': 5,
         'num_samples_inference': 30,
+        'dataset_name_or_id': '4',
     }
-    
 
 
     training_kwargs = {
         'num_epochs': 20,
         'lr': 1e-4,
         'weight_decay': 1e-4,
-        'output_dir': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints',
+        'output_dir': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints',
         'num_iterations_per_epoch': 250,
         'num_val_iterations': 5,
         'loss_kwargs': {
@@ -96,7 +98,7 @@ def get_model():
                         'lambda_kl': 1e-4
                     },
 
-        'eval_loader_data_path': '/scratch/awias/data/pancreas_validation',
+        'eval_loader_data_path': '/home/awias/data/pancreas_validation',
         }
     
     trainer = Trainer(model_kwargs, training_kwargs)
@@ -106,10 +108,10 @@ def get_model():
 
 def predict_with_nn_unet_on_filelist():
     print("Predict with NN U-Net")
-    model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
+    model_folder = "/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
 
-    input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-    output_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_variance"
+    input_data_folder = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
+    output_folder = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_variance"
      
     os.makedirs(output_folder, exist_ok=True)
 

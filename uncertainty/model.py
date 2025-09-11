@@ -408,9 +408,9 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
             loss, loss_attributes, mu =  self.online_sampling_and_loss(targets, mu, cov_out, diag_var_out, weighting=weighting, soft_weighting = weighting_soft, num_samples=num_samples)
         else:
             if os.environ.get('PREDICT_PIXEL_VARIANCE', '0') == '1':
-                mu = self.online_sampling_get_variance_for_predicter(mu, cov_out, diag_var_out,weighting = None, num_samples=num_samples)
+                mu = self.online_sampling_get_variance_for_predicter(mu, cov_out, diag_var_out,weighting = weighting, num_samples=num_samples)
             else:
-                mu = self.online_sampling(mu, cov_out, diag_var_out, num_samples=num_samples)
+                mu = self.online_sampling(mu, cov_out, diag_var_out, weighting = weighting, num_samples=num_samples)
             
         output = UncertaintyModelOutput(mu, cov_out, diag_var_out, logits, loss, loss_attributes)
         return output

@@ -41,48 +41,47 @@ def get_model():
     #     'num_samples_train': 5,
     #     'num_samples_inference': 30,
     #     'sample_type': 'ours', # Single basis
-    #     'dataset_name_or_id': 4
-
+    #     'dataset_name_or_id': '4'
     # }
     
     
-    # # This is PPT
-    # model_kwargs = {
-    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_ppt_run_1_model_epoch_5.pth',
-    #     'loss_kwargs': {
-    #                     'lambda_ce':1.0,
-    #                     'lambda_dice':1.0,
-    #                     'lambda_nll': 1.0,
-    #                     'lambda_kl': 1e-4
-    #                 },
-    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-    #     'num_samples_train': 5,
-    #     'num_samples_inference': 30,
-    #     'sample_type': 'torch' # PPT,
-    #      'dataset_name_or_id': 4
-    # }
-
-
-    # This is multi
+    # This is PPT
     model_kwargs = {
-        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_multi_basis_proper_gumbel_run_1_model_epoch_18.pth',
+        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_ppt_run_1_model_epoch_5.pth',
         'loss_kwargs': {
                         'lambda_ce':1.0,
                         'lambda_dice':1.0,
                         'lambda_nll': 1.0,
-                        'lambda_kl': 5*1e-4
+                        'lambda_kl': 1e-4
                     },
         'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-        'model_type': 'weighted_basis',
-        'cov_weighting_kwargs': {
-            'num_bases': 3,
-            'sample_type': 'partitioned',
-            'class': PartionedCovHead
-        },
         'num_samples_train': 5,
         'num_samples_inference': 30,
-        'dataset_name_or_id': 4,
+        'sample_type': 'torch',  # PPT
+        'dataset_name_or_id': '4'
     }
+
+
+    # This is multi
+    # model_kwargs = {
+    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_multi_basis_proper_gumbel_run_1_model_epoch_18.pth',
+    #     'loss_kwargs': {
+    #                     'lambda_ce':1.0,
+    #                     'lambda_dice':1.0,
+    #                     'lambda_nll': 1.0,
+    #                     'lambda_kl': 5*1e-4
+    #                 },
+    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'model_type': 'weighted_basis',
+    #     'cov_weighting_kwargs': {
+    #         'num_bases': 3,
+    #         'sample_type': 'partitioned',
+    #         'class': PartionedCovHead
+    #     },
+    #     'num_samples_train': 5,
+    #     'num_samples_inference': 30,
+    #     'dataset_name_or_id': '4',
+    # }
     
 
 
