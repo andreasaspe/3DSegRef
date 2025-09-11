@@ -14,7 +14,7 @@ import torch.nn as nn
 import sys
 
 sys.path.append("/home/awias/code/3DSegRef/uncertainty")
-from trainer_Andreas import Trainer
+from trainer import Trainer
 from model import PartionedCovHead
 
 class WrappedModel(nn.Module):
@@ -40,7 +40,6 @@ def get_model():
         'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
         'num_samples_inference': 30,
-        'basic': False,
         'sample_type': 'ours' # Single basis
     }
     
@@ -57,7 +56,6 @@ def get_model():
         'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
         'num_samples_inference': 30,
-        'basic': False,
         'sample_type': 'torch' # PPT
     }
 
@@ -80,24 +78,7 @@ def get_model():
         },
         'num_samples_train': 5,
         'num_samples_inference': 30,
-        'basic': False,
     }
-    
-
-    # model_kwargs = {
-    #     'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
-    #     'loss_kwargs': {
-    #                     'lambda_ce':1.0,
-    #                     'lambda_dice':1.0,
-    #                     'lambda_nll': 1.0,
-    #                     'lambda_kl': 1e-4
-    #                 },
-    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-    #     'num_samples_train': 5,
-    #     'num_samples_inference': 100,
-    #     'basic': True
-    # }
-    
     
 
     training_kwargs = {

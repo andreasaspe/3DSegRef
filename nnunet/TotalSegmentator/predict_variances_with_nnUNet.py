@@ -14,7 +14,8 @@ import torch.nn as nn
 import sys
 
 sys.path.append("/home/awias/code/3DSegRef/uncertainty")
-from trainer_Andreas import Trainer
+from trainer import Trainer
+from model import PartionedCovHead
 
 class WrappedModel(nn.Module):
     def __init__(self, model):
@@ -27,6 +28,7 @@ class WrappedModel(nn.Module):
     
 def get_model():
     
+    # Best single basis
     model_kwargs = {
         'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
         'loss_kwargs': {
@@ -38,22 +40,47 @@ def get_model():
         'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
         'num_samples_train': 5,
         'num_samples_inference': 30,
-        'basic': False
+        'sample_type': 'ours' # Single basis
     }
     
-    # model_kwargs = {
-    #     'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
-    #     'loss_kwargs': {
-    #                     'lambda_ce':1.0,
-    #                     'lambda_dice':1.0,
-    #                     'lambda_nll': 1.0,
-    #                     'lambda_kl': 1e-4
-    #                 },
-    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-    #     'num_samples_train': 5,
-    #     'num_samples_inference': 100,
-    #     'basic': True
-    # }
+    
+    # This is PPT
+    model_kwargs = {
+        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_ppt_run_1_model_epoch_5.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+        'sample_type': 'torch' # PPT
+    }
+
+
+    # This is multi
+    model_kwargs = {
+        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_multi_basis_proper_gumbel_run_1_model_epoch_18.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 5*1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'model_type': 'weighted_basis',
+        'cov_weighting_kwargs': {
+            'num_bases': 3,
+            'sample_type': 'partitioned',
+            'class': PartionedCovHead
+        },
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+    }
+    
+
 
     training_kwargs = {
         'num_epochs': 20,
@@ -75,6 +102,7 @@ def get_model():
     trainer = Trainer(model_kwargs, training_kwargs)
     model = WrappedModel(trainer.model)
     return model
+
 
 def predict_with_nn_unet_on_filelist():
     print("Predict with NN U-Net")
