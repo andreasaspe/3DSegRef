@@ -526,6 +526,11 @@ class UnetWithUncertainty(AbstractDynamicNetworkArchitectures):
         # dist = torch.distributions.LowRankMultivariateNormal(
         #     mu.view(batch_size, -1), a.permute(0,2,3,4,1).reshape(batch_size, D*H*W, self.cov_rank), sigma.view(batch_size, -1)
         # )
+        
+        # Typecasting to double because other I got an error with cholesky decomposition.. Should be float32 compatible which is best.
+        mu = mu.double()
+        a = a.double()
+        sigma = sigma.double()
 
         dist = torch.distributions.LowRankMultivariateNormal(
             mu.view(batch_size, -1), a.reshape(batch_size, C*D*H*W, self.cov_rank // C), sigma.view(batch_size, -1)

@@ -26,18 +26,18 @@ class WrappedModel(nn.Module):
         return self.model(x).mu
     
     
-def get_model():
+def get_model(basis_model_only=False):
     
     # # Best single basis
     # model_kwargs = {
-    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+    #     'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
     #     'loss_kwargs': {
     #                     'lambda_ce':1.0,
     #                     'lambda_dice':1.0,
     #                     'lambda_nll': 1.0,
     #                     'lambda_kl': 1e-4
     #                 },
-    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
     #     'num_samples_train': 5,
     #     'num_samples_inference': 30,
     #     'sample_type': 'ours', # Single basis
@@ -46,32 +46,32 @@ def get_model():
     
     
     # This is PPT
-    model_kwargs = {
-        'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_ppt_run_1_model_epoch_5.pth',
-        'loss_kwargs': {
-                        'lambda_ce':1.0,
-                        'lambda_dice':1.0,
-                        'lambda_nll': 1.0,
-                        'lambda_kl': 1e-4
-                    },
-        'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-        'num_samples_train': 5,
-        'num_samples_inference': 30,
-        'sample_type': 'torch',  # PPT
-        'dataset_name_or_id': '4'
-    }
+    # model_kwargs = {
+    #     'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_ppt_run_1_model_epoch_5.pth',
+    #     'loss_kwargs': {
+    #                     'lambda_ce':1.0,
+    #                     'lambda_dice':1.0,
+    #                     'lambda_nll': 1.0,
+    #                     'lambda_kl': 1e-4
+    #                 },
+    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'num_samples_train': 5,
+    #     'num_samples_inference': 30,
+    #     'sample_type': 'torch',  # PPT
+    #     'dataset_name_or_id': '4'
+    # }
 
 
     # This is multi
     # model_kwargs = {
-    #     'checkpoint_path': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_multi_basis_proper_gumbel_run_1_model_epoch_18.pth',
+    #     'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_multi_basis_proper_gumbel_run_1_model_epoch_18.pth',
     #     'loss_kwargs': {
     #                     'lambda_ce':1.0,
     #                     'lambda_dice':1.0,
     #                     'lambda_nll': 1.0,
     #                     'lambda_kl': 5*1e-4
     #                 },
-    #     'path_to_base': '/home/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
     #     'model_type': 'weighted_basis',
     #     'cov_weighting_kwargs': {
     #         'num_bases': 3,
@@ -83,13 +83,32 @@ def get_model():
     #     'dataset_name_or_id': '4',
     # }
     
+    
+    # This is basic (deterministic)
+    model_kwargs = {
+        'checkpoint_path': "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth",
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+        'sample_type': 'ours', # Single basis
+        'dataset_name_or_id': '4'
+    }
+    
+    
+    
 
 
     training_kwargs = {
         'num_epochs': 20,
         'lr': 1e-4,
         'weight_decay': 1e-4,
-        'output_dir': '/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints',
+        'output_dir': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints',
         'num_iterations_per_epoch': 250,
         'num_val_iterations': 5,
         'loss_kwargs': {
@@ -98,22 +117,31 @@ def get_model():
                         'lambda_nll': 1.0,
                         'lambda_kl': 1e-4
                     },
-
-        'eval_loader_data_path': '/home/awias/data/pancreas_validation',
+        'eval_loader_data_path': '/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs', #Random strange path
         }
     
     trainer = Trainer(model_kwargs, training_kwargs)
+    trainer.model.basis_model_only(basis_model_only)
     model = WrappedModel(trainer.model)
     return model
 
 def predict_with_nn_unet_on_filelist():
     print("Predict with NN U-Net")
-    model_folder = "/home/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
+    model_folder = "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres"
 
-    input_data_folder = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
-    output_folder = "/home/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions/man_preds_stochastic"
+    input_data_folder = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/imagesTs"
+    output_folder_root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions"
+    
+    # Change folder name
+    foldername = "man_preds_stochastic_deterministic" #CHANGE HERE
+    output_folder = os.path.join(output_folder_root, foldername)
+    
+    
+    
+    
 
-    os.environ["nnUNet_results"] = "/home/awias/data/nnUNet_dataset/nnUNet_results"
+    os.environ["nnUNet_results"] = "/scratch/awias/data/nnUNet_dataset/nnUNet_results"
+    
  
     os.makedirs(output_folder, exist_ok=True)
 
@@ -153,15 +181,28 @@ def predict_with_nn_unet_on_filelist():
     )
     
 
-    # Should be COMMENTED OUT when using deterministic nnU-Net
-    model = get_model()
+    # This is for STOCHASTIC. Should be COMMENTED OUT when using deterministic nnU-Net
+    # model = get_model(basis_model_only=False)
+    # predictor.network = model
+    # predictor.network.get_variance = False
+    # predictor.network.to(predictor.device)
+    # predictor.network.eval()
+    # os.environ['DO_NOT_USE_SOFTMAX'] = '1' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
+    # print(f"Predicting from files")
+    # predictor.list_of_parameters = [model.state_dict()]
+
+
+    # This is for DETERMINSTIC. Should be COMMENTED OUT when using stochastic nnU-Net
+    model = get_model(basis_model_only=True)
     predictor.network = model
     predictor.network.get_variance = False
     predictor.network.to(predictor.device)
     predictor.network.eval()
-    os.environ['DO_NOT_USE_SOFTMAX'] = '1' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
+    os.environ['DO_NOT_USE_SOFTMAX'] = '0' # Set to 1 if you DO NOT want to use softmax. This is needed, because our own model DOES take a softmax in the sampling. Basic nnN U-Net does not.
     print(f"Predicting from files")
     predictor.list_of_parameters = [model.state_dict()]
+
+
 
 
     predictor.predict_from_files(in_files,
