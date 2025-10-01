@@ -14,3 +14,21 @@ til at preprocessere de enkelte datasæt i NNDL
 Den fil er parallel. Den laver både reset affine og reorient parallel samt copy files into right folders.
 Jeg laver en ny affine for at undgå DICOM file og afrundsfejl osv, så jeg kan åbne det i 3D slicer. Vil gerne være sikker på, hvad affine er og er der ikke er nogle numeriske fejl, der fucker mig op.
 Den tager stadig de rigtige zooms osv.
+
+
+
+De her datasæt er for NNDL:
+Dataset003_TotalSegmentatorLiver
+Dataset004_TotalSegmentatorPancreas
+Dataset005_TotalSegmentatorSpleen
+Dataset006_TotalSegmentatorGallbladder
+Dataset007_TotalSegmentatorAdrenal_gland_left
+Dataset008_TotalSegmentatorAdrenal_gland_right
+Dataset009_TotalSegmentatorDuodenum
+Dataset010_TotalSegmentatorPortal_vein_and_splenic_vein
+Dataset011_TotalSegmentatorHumerus_left
+Dataset012_TotalSegmentatorHumerus_right
+Alle er Single class
+
+
+De her datasæt er for CVPR:
