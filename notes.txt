@@ -6,7 +6,7 @@ conda activate nnunet_v2
 export nnUNet_raw="/scratch/awias/data/nnUNet/nnUNet_raw"
 export nnUNet_results="/scratch/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/scratch/awias/data/nnUNet/nnUNet_preprocessed"
-nnUNetv2_train 4 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans
+nnUNetv2_train 13 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans
 
 Dataset004_TotalSegmentatorPancreas
 Dataset006_TotalSegmentatorGallbladder
