@@ -87,7 +87,7 @@ def process_subject(subj, base_dir, savepath_root, organ, new_orientation=("L","
         return f"Error processing {subj}: {str(e)}"
 
 #############################
-# MAIN PIPELINE
+# MAIN PIPELINE 
 #############################
 def main():
     os.makedirs(savepath_root, exist_ok=True)
