@@ -1,0 +1,16 @@
+Først lav preprocessing. Vend alt den samme vej osv. Ved ikke, om det er nødvendigt, men det er nemmere for mig bagefter.
+
+Derefter træn.
+
+Denne fil predicter variances:
+3DSegRef/nnunet/TotalSegmentator/predict_variances_with_nnUNet.py
+
+
+Du kan bruge det her script:
+3DSegRef/nnunet/TotalSegmentator/Preprocess_script_TOTAL.py
+og det her
+3DSegRef/nnunet/TotalSegmentator/Preprocess_script_TOTAL_nosplitting.py
+til at preprocessere de enkelte datasæt i NNDL
+Den fil er parallel. Den laver både reset affine og reorient parallel samt copy files into right folders.
+Jeg laver en ny affine for at undgå DICOM file og afrundsfejl osv, så jeg kan åbne det i 3D slicer. Vil gerne være sikker på, hvad affine er og er der ikke er nogle numeriske fejl, der fucker mig op.
+Den tager stadig de rigtige zooms osv.

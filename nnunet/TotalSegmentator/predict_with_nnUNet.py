@@ -28,21 +28,21 @@ class WrappedModel(nn.Module):
     
 def get_model(basis_model_only=False):
     
-    # # Best single basis
-    # model_kwargs = {
-    #     'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
-    #     'loss_kwargs': {
-    #                     'lambda_ce':1.0,
-    #                     'lambda_dice':1.0,
-    #                     'lambda_nll': 1.0,
-    #                     'lambda_kl': 1e-4
-    #                 },
-    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-    #     'num_samples_train': 5,
-    #     'num_samples_inference': 30,
-    #     'sample_type': 'ours', # Single basis
-    #     'dataset_name_or_id': '4'
-    # }
+    # Best single basis
+    model_kwargs = {
+        'checkpoint_path': '/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/checkpoints/exp_basic_run_4_model_epoch_10.pth', #'/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth',
+        'loss_kwargs': {
+                        'lambda_ce':1.0,
+                        'lambda_dice':1.0,
+                        'lambda_nll': 1.0,
+                        'lambda_kl': 1e-4
+                    },
+        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+        'num_samples_train': 5,
+        'num_samples_inference': 30,
+        'sample_type': 'ours', # Single basis
+        'dataset_name_or_id': '4'
+    }
     
     
     # This is PPT
@@ -85,20 +85,20 @@ def get_model(basis_model_only=False):
     
     
     # This is basic (deterministic)
-    model_kwargs = {
-        'checkpoint_path': "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth",
-        'loss_kwargs': {
-                        'lambda_ce':1.0,
-                        'lambda_dice':1.0,
-                        'lambda_nll': 1.0,
-                        'lambda_kl': 1e-4
-                    },
-        'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
-        'num_samples_train': 5,
-        'num_samples_inference': 30,
-        'sample_type': 'ours', # Single basis
-        'dataset_name_or_id': '4'
-    }
+    # model_kwargs = {
+    #     'checkpoint_path': "/scratch/awias/data/nnUNet/nnUNet_results/Dataset004_TotalSegmentatorPancreas/nnUNetTrainerNoMirroring__nnUNetResEncUNetLPlans__3d_fullres/fold_0/checkpoint_best.pth",
+    #     'loss_kwargs': {
+    #                     'lambda_ce':1.0,
+    #                     'lambda_dice':1.0,
+    #                     'lambda_nll': 1.0,
+    #                     'lambda_kl': 1e-4
+    #                 },
+    #     'path_to_base': '/scratch/awias/data/nnUNet/info_dict_TotalSegmentatorPancreas.pkl',
+    #     'num_samples_train': 5,
+    #     'num_samples_inference': 30,
+    #     'sample_type': 'ours', # Single basis
+    #     'dataset_name_or_id': '4'
+    # }
     
     
     
@@ -133,7 +133,7 @@ def predict_with_nn_unet_on_filelist():
     output_folder_root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions"
     
     # Change folder name
-    foldername = "man_preds_deterministic" #CHANGE HERE
+    foldername = "man_preds_stochastic_single" #CHANGE HERE
     output_folder = os.path.join(output_folder_root, foldername)
     
     

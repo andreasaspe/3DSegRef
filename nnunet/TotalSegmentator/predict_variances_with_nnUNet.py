@@ -13,7 +13,7 @@ import os
 import torch.nn as nn 
 import sys
 
-sys.path.append("/scratch/awias/code/3DSegRef/uncertainty")
+sys.path.append("/home/awias/code/3DSegRef/uncertainty")
 from trainer import Trainer
 from model import PartionedCovHead
 
@@ -114,7 +114,7 @@ def predict_with_nn_unet_on_filelist():
     output_folder_root = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset004_TotalSegmentatorPancreas/predictions"
     
     # Change folder name
-    foldername = "man_preds_variance" #CHANGE HERE
+    foldername = "man_preds_multibasis_variance" #CHANGE HERE
     output_folder = os.path.join(output_folder_root, foldername)
     
     
