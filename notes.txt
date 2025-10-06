@@ -23,6 +23,21 @@ export nnUNet_preprocessed="/home/awias/data/nnUNet/nnUNet_preprocessed"
 CUDA_VISIBLE_DEVICES=3
 
 
+important paths:
+kalder nnUNetDatasetBlosc2 (/home/awias/code/nnUNet/nnunetv2/training/dataloading/nnunet_dataset.py)
+
+ søg efter self.optimizer.step() i filen nnUNetTrainer.py
+
+Her ændrer du epochs osv:
+/home/awias/code/nnUNet_v2/nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py
+
+Her gemmer jeg logits:
+/home/awias/code/nnUNet_v2/nnunetv2/inference/export_prediction.py
+
+Ændring af info_dict
+nnUNet_v2/nnunetv2/utilities/get_network_from_plans.py
+
+
 Terminal overblik
 
 Pancreas1 træner GALLBLADDER (1) --c
