@@ -6,7 +6,7 @@ conda activate nnunet_v2
 export nnUNet_raw="/scratch/awias/data/nnUNet/nnUNet_raw"
 export nnUNet_results="/scratch/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/scratch/awias/data/nnUNet/nnUNet_preprocessed"
-nnUNetv2_train 9 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans
+nnUNetv2_train 13 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans
 
 Dataset004_TotalSegmentatorPancreas
 Dataset006_TotalSegmentatorGallbladder
@@ -26,6 +26,21 @@ Patient 551. Segment 215 i midterste dimension er godt til at vise multibasis_pr
 
 
 CUDA_VISIBLE_DEVICES=3
+
+
+important paths:
+kalder nnUNetDatasetBlosc2 (/home/awias/code/nnUNet/nnunetv2/training/dataloading/nnunet_dataset.py)
+
+ søg efter self.optimizer.step() i filen nnUNetTrainer.py
+
+Her ændrer du epochs osv:
+/home/awias/code/nnUNet_v2/nnunetv2/training/nnUNetTrainer/nnUNetTrainer.py
+
+Her gemmer jeg logits:
+/home/awias/code/nnUNet_v2/nnunetv2/inference/export_prediction.py
+
+Ændring af info_dict
+nnUNet_v2/nnunetv2/utilities/get_network_from_plans.py
 
 
 Terminal overblik

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: bash run_nnunet_pipeline.sh <dataset_id>
+# Usage: bash Automated_setup_nnunet.sh <dataset_id>
 
 # Stop script if any command fails
 set -e
