@@ -22,6 +22,10 @@ export nnUNet_results="/home/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/home/awias/data/nnUNet/nnUNet_preprocessed"
 
 
+Sådan her laver jeg preprocessing af MSD
+nnUNetv2_convert_MSD_dataset -i /scratch/awias/data/MSD/Task07_Pancreas/ -overwrite_id 16
+
+
 Patient 551. Segment 215 i midterste dimension er godt til at vise multibasis_prop
 
 
