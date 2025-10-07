@@ -30,5 +30,8 @@ Dataset011_TotalSegmentatorHumerus_left
 Dataset012_TotalSegmentatorHumerus_right
 Alle er Single class
 
-
 De her datasæt er for CVPR:
+Dataset014_BrainTumour
+Dataset015_Heart
+Dataset016_Pancreas
+De er klasser i MSD
