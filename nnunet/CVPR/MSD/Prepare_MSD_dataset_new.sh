@@ -28,7 +28,9 @@ DATASETS=(
     "Task09_Spleen"
     "Task10_Colon"
 )
-IDS=(16 17 18 19 20 21 22 23)
+IDS=(17 18 19 20 21 22 23)
+
+nnUNetv2_preprocess -d 16 -c 3d_fullres -pl nnUNetResEncUNetLPlans -np 8
 
 # === Fingerprint, plan, and preprocess ===
 echo "Processing datasets..."
