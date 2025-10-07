@@ -6,13 +6,15 @@ conda activate nnunet_v2
 export nnUNet_raw="/scratch/awias/data/nnUNet/nnUNet_raw"
 export nnUNet_results="/scratch/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/scratch/awias/data/nnUNet/nnUNet_preprocessed"
-nnUNetv2_train 4 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans
+nnUNetv2_train 9 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans
 
 Dataset004_TotalSegmentatorPancreas
 Dataset006_TotalSegmentatorGallbladder
 
 
 srun --gres=gpu -c 8 --pty --mem 40g bash
+srun --gres=gpu -c 16 --pty --mem 64g bash
+ srun --gres=gpu -c 16 --nodelist=comp-gpu13 --pty --mem 40g bash
 srun -c 16 --mem=32G --pty bash
 
 export nnUNet_raw="/home/awias/data/nnUNet/nnUNet_raw"
@@ -20,14 +22,41 @@ export nnUNet_results="/home/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/home/awias/data/nnUNet/nnUNet_preprocessed"
 
 
+Patient 551. Segment 215 i midterste dimension er godt til at vise multibasis_prop
+
+
 CUDA_VISIBLE_DEVICES=3
 
 
 Terminal overblik
+new2 - AG (4)          VIRKER
+new3 - Duedoenum(4)        VIRKER
+26 - GallBladder (4)     VIRKER
+new4 - GallBladder(1)
+new5 - GallBladder(3)
+new6 - AG(1)
+other4 - Dueduonum(1)
 
-Pancreas1 træner GALLBLADDER (1) --c
-Pancreas2 træner GALLBLADDER (2)
-Pancreas4 træner GALLBLADDER (3)
+
+Mangler:
+Gallbaldder (1) - lidt (træner)
+Gallbaldder (2) - færdig
+Gallbaldder (3) - lidt (træner)
+Gallbaldder (4) - lidt (træner)
+AG(1) - FÆRDIG (træn mere, hvis du har tid) (træner)
+AG(2) - FÆRDIG
+AG(3) - FÆRDIG (træn mere, hvis du har tid)
+AG(4) - lidt (træner)
+Duedoenum (1) FÆRDIG (træn mere, hvis du har tid) (træner)
+Duedoenum (2) FÆRDIG
+Duedoenum (3) FÆRDIG (træn mere, hvis du har tid)
+Duedoenum (4) lidt (træner)
+
+
+
+
+
+
 
 
 Pancreas (1) er ish færdigtrænet
