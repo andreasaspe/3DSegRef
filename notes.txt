@@ -6,7 +6,7 @@ conda activate nnunet_v2
 export nnUNet_raw="/scratch/awias/data/nnUNet/nnUNet_raw"
 export nnUNet_results="/scratch/awias/data/nnUNet/nnUNet_results"
 export nnUNet_preprocessed="/scratch/awias/data/nnUNet/nnUNet_preprocessed"
-nnUNetv2_train 13 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans
+nnUNetv2_train 22 3d_fullres 0 -tr nnUNetTrainerNoMirroring -p nnUNetResEncUNetLPlans
 
 Dataset004_TotalSegmentatorPancreas
 Dataset006_TotalSegmentatorGallbladder
@@ -48,14 +48,10 @@ nnUNet_v2/nnunetv2/utilities/get_network_from_plans.py
 
 
 Terminal overblik
-new2 - AG (4)          VIRKER
-new3 - Duedoenum(4)        VIRKER
-26 - GallBladder (4)     VIRKER
-new4 - GallBladder(1)
-new5 - GallBladder(3)
-new6 - AG(1)
-other4 - Dueduonum(1)
-
+6 - træner BrainTumor (14)
+5 - træner Pancreas (20)
+1 - træner Heart (15)
+2 - træner spleen (22)
 
 Mangler:
 Gallbaldder (1) - lidt (træner)
