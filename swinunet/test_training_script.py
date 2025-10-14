@@ -11,7 +11,8 @@ def generate_synthetic_data(num_samples=10, img_size=(96,96,96), num_classes=4):
     data = []
     for _ in range(num_samples):
         img = torch.randn(1, *img_size)          # 1-channel image
-        lbl = torch.randint(0, 10, (num_classes, *img_size))  # shape: (num_classes, img_size)
+        # lbl = torch.randint(0, 10, (num_classes, *img_size))  # shape: (num_classes, img_size)
+        lbl = torch.randint(0, num_classes, (1, *img_size))
         data.append({"image": img, "label": lbl})
     return data
 
@@ -31,7 +32,7 @@ model = SwinUNETR(
     spatial_dims=3
 ).to(device)
 
-loss_function = DiceCELoss(to_onehot_y=False, softmax=True)
+loss_function = DiceCELoss(to_onehot_y=True, softmax=True)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 dice_metric = DiceMetric(include_background=False, reduction="mean")
 
