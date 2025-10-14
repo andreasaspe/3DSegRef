@@ -20,10 +20,10 @@ train_files = generate_synthetic_data()
 
 
 train_ds = Dataset(data=train_files)
-train_loader = DataLoader(train_ds, batch_size=1, shuffle=True)
+train_loader = DataLoader(train_ds, batch_size=1, shuffle=True) 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+ 
 model = SwinUNETR(
     in_channels=1,
     out_channels=4,
