@@ -24,22 +24,22 @@ def preprocess(data_dir, output_dir):
     preproc = Compose([
         LoadImaged(keys=["image", "label"]),
         EnsureChannelFirstd(keys=["image", "label"]),
-        # Orientationd(keys=["image", "label"], axcodes="RAS"),
-        # Spacingd(
-        #     keys=["image", "label"],
-        #     pixdim=(1.5, 1.5, 1.5),
-        #     mode=("bilinear", "nearest")
-        # ),
-        # ScaleIntensityRanged(
-        #     keys=["image"],
-        #     a_min=-160.0,  # -175.0,
-        #     a_max=240.0,  # 250.0,
-        #     b_min=-1.0,
-        #     b_max=1.0,
-        #     clip=True
-        # ),
-        # CropForegroundd(keys=["image", "label"], source_key="image"),
-        # EnsureTyped(keys=["image", "label"]),
+        Orientationd(keys=["image", "label"], axcodes="RAS"),
+        Spacingd(
+            keys=["image", "label"],
+            pixdim=(1.5, 1.5, 1.5),
+            mode=("bilinear", "nearest")
+        ),
+        ScaleIntensityRanged(
+            keys=["image"],
+            a_min=-160.0,  # -175.0,
+            a_max=240.0,  # 250.0,
+            b_min=-1.0,
+            b_max=1.0,
+            clip=True
+        ),
+        CropForegroundd(keys=["image", "label"], source_key="image"),
+        EnsureTyped(keys=["image", "label"]),
         SaveImaged(keys=["image", "label"],
                    output_dir=output_dir,
                    output_postfix="preproc",
