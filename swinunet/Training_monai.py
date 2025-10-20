@@ -88,7 +88,7 @@ def get_train_transforms(roi_size=(96, 96, 96), num_samples=4):
         Orientationd(keys=["image", "label"], axcodes="RAS"),
         Spacingd(
             keys=["image", "label"],
-            pixdim=(1.5, 1.5, 2.0),  # Adjust to your dataset
+            pixdim=(1.5, 1.5, 1.5),  # Adjust to your dataset
             mode=("bilinear", "nearest")
         ),
         ScaleIntensityRanged(
@@ -254,6 +254,8 @@ def train_epoch(model, loader, optimizer, loss_function, device, scaler=None):
         image = batch_data["image"].to(device)
         label = batch_data["label"].to(device)
         
+        print("HEY")
+        
         optimizer.zero_grad()
         
         # Mixed precision training
@@ -320,7 +322,7 @@ def main():
     # Configuration
     data_dir = "/home/awias/data/SwinUNETR"
     roi_size = (96, 96, 96)  # Patch size - adjust based on GPU memory
-    batch_size = 2  # Number of patches per batch
+    batch_size = 1  # Number of patches per batch
     num_samples = 4  # Patches sampled per image
     num_epochs = 100
     val_interval = 2  # Validate every N epochs
