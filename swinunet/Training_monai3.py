@@ -218,7 +218,7 @@ def main():
         train_ds_augmented,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
+        num_workers=1,
         pin_memory=True,
         collate_fn=list_data_collate,
         persistent_workers=True  # Keep workers alive between epochs
@@ -228,7 +228,7 @@ def main():
         val_ds,
         batch_size=1,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=1,
         pin_memory=True,
         persistent_workers=True
     )
