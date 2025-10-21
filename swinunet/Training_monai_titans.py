@@ -20,6 +20,7 @@ from monai.metrics import DiceMetric
 from monai.inferers import sliding_window_inference
 from monai.transforms import SpatialPadd
 from monai.transforms import DivisiblePadd
+from monai.transforms import RandScaleIntensityd, RandGaussianNoised
 
 
 def get_data_files(data_dir, train_val_split=0.8):
@@ -85,7 +86,21 @@ def get_train_transforms_patches(roi_size=(96, 96, 96), num_samples=2):
             image_key="image",
             image_threshold=0
         ),
-        # RandAffined(keys=["image", "label"], prob=0.3, rotate_range=(0.1, 0.1, 0.1)),
+                # ADD THESE:
+        RandFlipd(keys=["image", "label"], spatial_axis=[0], prob=0.5),
+        RandFlipd(keys=["image", "label"], spatial_axis=[1], prob=0.5),
+        RandFlipd(keys=["image", "label"], spatial_axis=[2], prob=0.5),
+        RandRotate90d(keys=["image", "label"], prob=0.5, max_k=3),
+        RandAffined(
+            keys=["image", "label"], 
+            prob=0.5,
+            rotate_range=(0.2, 0.2, 0.2),  # More rotation
+            scale_range=(0.1, 0.1, 0.1),   # Add scaling
+            mode=("bilinear", "nearest")
+        ),
+        RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
+        RandScaleIntensityd(keys=["image"], factors=0.1, prob=0.5),
+        RandGaussianNoised(keys=["image"], prob=0.15, std=0.01),
         EnsureTyped(keys=["image", "label"])
     ])
     
@@ -159,6 +174,8 @@ def validate(model, loader, dice_metric, loss_fn, device, roi_size=(96, 96, 96))
     
     step = 0
     
+    epoch_loss = 0
+    
     with torch.no_grad():
         warnings.filterwarnings("ignore", category=UserWarning, message="Using a non-tuple sequence")
         for batch_data in tqdm(loader, desc="Validation"):
@@ -195,13 +212,13 @@ def main():
     checkpoint_dir = "/scratch/awias/data/SwinUNETR/Dataset013_TotalSegmentator_4organs/checkpoints"
 
     # REMEMBER TO SET A RUN NAME
-    run_name = "First_try"
+    run_name = "Second_try"
     print(f"\nHAVE YOU SET A NEW RUN NAME? CURRENT RUN NAME: {run_name}\n")
     
     # DEFINE STUFF
     parameters_dict = {
         'run_name': run_name,
-        'description': 'This is my first try. Voxel size is 1.5 mm isotropic. Dataset is TotalsSegmentator4Organs.',
+        'description': 'Second try. With data augmentation. Voxel size is 1.5 mm isotropic. Dataset is TotalsSegmentator4Organs.',
         'epochs': 200,
         'learning_rate': 1e-4,
         'weight_decay': 1e-5,
@@ -278,7 +295,7 @@ def main():
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=True,
         num_workers=4,  # Use multiple workers
         pin_memory=torch.cuda.is_available()
     )
@@ -336,7 +353,7 @@ def main():
 
             if dice_score > best_metric:
                 best_metric = dice_score
-                torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"{run_name}_{wandb_id}_best_model.pth"))
+                torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"{run_name}_{wandb_id}_epoch{epoch}_best_model.pth"))
                 print(f"✓ Saved new best model!")
                 
 
