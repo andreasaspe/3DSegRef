@@ -4,7 +4,9 @@ import warnings
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import wandb
 
+from monai.transforms import RandAffined
 from monai.data import Dataset
 from monai.transforms import (
     Compose, LoadImaged, EnsureChannelFirstd, Orientationd,
@@ -47,7 +49,7 @@ def get_train_transforms(roi_size=(96, 96, 96), num_samples=2):
     return Compose([
         LoadImaged(keys=["image", "label"]),
         EnsureChannelFirstd(keys=["image", "label"]),
-        DivisiblePadd(keys=["image", "label"], k=32),  # Pad to multiple of 32
+        DivisiblePadd(keys=["image", "label"], k=32),  # Pad to multiple of 32. OBS, MIGHT RESULT IN INCONSISTENT SHAPES!
         RandFlipd(keys=["image", "label"], spatial_axis=[0], prob=0.5),
         RandFlipd(keys=["image", "label"], spatial_axis=[1], prob=0.5),
         RandRotate90d(keys=["image", "label"], prob=0.5, max_k=3),
@@ -61,7 +63,18 @@ def get_train_transforms_patches(roi_size=(96, 96, 96), num_samples=2):
     return Compose([
         LoadImaged(keys=["image", "label"]),
         EnsureChannelFirstd(keys=["image", "label"]),
-        SpatialPadd(keys=["image", "label"], spatial_size=roi_size),
+        SpatialPadd(
+            keys=["image"],
+            spatial_size=roi_size,
+            mode="constant",
+            value=-1.0
+        ),
+        SpatialPadd(
+            keys=["label"],
+            spatial_size=roi_size,
+            mode="constant",
+            value=0
+        ),
         RandCropByPosNegLabeld(
             keys=["image", "label"],
             label_key="label",
@@ -72,12 +85,10 @@ def get_train_transforms_patches(roi_size=(96, 96, 96), num_samples=2):
             image_key="image",
             image_threshold=0
         ),
-        RandFlipd(keys=["image", "label"], spatial_axis=[0], prob=0.5),
-        RandFlipd(keys=["image", "label"], spatial_axis=[1], prob=0.5),
-        RandRotate90d(keys=["image", "label"], prob=0.5, max_k=3),
-        RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
+        # RandAffined(keys=["image", "label"], prob=0.3, rotate_range=(0.1, 0.1, 0.1)),
         EnsureTyped(keys=["image", "label"])
     ])
+    
 
 def get_val_transforms():
     """Validation transforms - no augmentation."""
@@ -118,8 +129,6 @@ def train_epoch_patch(model, loader, optimizer, loss_fn, device):
     epoch_loss = 0
     step = 0
     
-    idx = 0
-
     for batch_data in tqdm(loader, desc="Training"):
             # batch_data is a list of dicts when using RandCropByPosNegLabeld with num_samples > 1
             # Each dict contains one patch
@@ -138,22 +147,18 @@ def train_epoch_patch(model, loader, optimizer, loss_fn, device):
                 epoch_loss += loss.item()
                 step += 1
             
-            # if idx == 15:
-            #     break
-            # idx += 1
-
     return epoch_loss / step
 
 
 
 
 
-def validate(model, loader, dice_metric, device, roi_size=(96, 96, 96)):
+def validate(model, loader, dice_metric, loss_fn, device, roi_size=(96, 96, 96)):
     """Validate with sliding window inference."""
     model.eval()
     
-    idx = 0
-
+    step = 0
+    
     with torch.no_grad():
         warnings.filterwarnings("ignore", category=UserWarning, message="Using a non-tuple sequence")
         for batch_data in tqdm(loader, desc="Validation"):
@@ -168,30 +173,83 @@ def validate(model, loader, dice_metric, device, roi_size=(96, 96, 96)):
                 overlap=0.5,
                 mode="gaussian"
             )
-
+            
+            # Calculate validation loss
+            loss = loss_fn(outputs, label)
+            epoch_loss += loss.item()
+            step += 1
+            
             outputs = torch.argmax(outputs, dim=1, keepdim=True)
             label = torch.argmax(label, dim=1, keepdim=True) if label.shape[1] > 1 else label
 
             dice_metric(y_pred=outputs, y=label)
 
-            if idx == 15:
-                break
-            idx += 1
-
     metric = dice_metric.aggregate().item()
     dice_metric.reset()
-    return metric
+    return epoch_loss / step, metric
 
 
 def main():
     # Configuration
     data_dir = "/scratch/awias/data/SwinUNETR/Dataset013_TotalSegmentator_4organs/train"
-    roi_size = (96, 96, 96)
-    batch_size = 1
-    num_samples = 2  # Patches per image
-    num_epochs = 100
-    val_interval = 2
-    patching = True  # Whether to use patch-based training
+    checkpoint_dir = "/scratch/awias/data/SwinUNETR/Dataset013_TotalSegmentator_4organs/checkpoints"
+
+    # REMEMBER TO SET A RUN NAME
+    run_name = "First_try"
+    print(f"\nHAVE YOU SET A NEW RUN NAME? CURRENT RUN NAME: {run_name}\n")
+    
+    # DEFINE STUFF
+    parameters_dict = {
+        'run_name': run_name,
+        'description': 'This is my first try. Voxel size is 1.5 mm isotropic. Dataset is TotalsSegmentator4Organs.',
+        'epochs': 200,
+        'learning_rate': 1e-4,
+        'weight_decay': 1e-5,
+        'batch_size': 1,
+        'num_samples': 2, #Samples per patches
+        'patching': True, # Whether to use patch-based training
+        'roi_size': (96, 96, 96),
+        'val_interval': 2,
+    }
+
+    # Unpack parameters
+    num_epochs = parameters_dict['epochs']
+    lr = parameters_dict['learning_rate']
+    wd = parameters_dict['weight_decay']
+    batch_size = parameters_dict['batch_size']
+    num_samples = parameters_dict['num_samples']
+    patching = parameters_dict['patching']
+    roi_size = parameters_dict['roi_size']
+    val_interval = parameters_dict['val_interval']
+    run_name = parameters_dict['run_name']
+    description = parameters_dict['description']
+    
+    #Start wand.db
+    wandb.init(
+        # set the wandb project where this run will be logged
+        project="SwinUNETR_ProjectWithPeter",
+        entity='andreasaspe',
+        name=run_name,
+        notes = description,
+        
+        # track hyperparameters and run metadata
+        config={
+        "learning_rate": lr,
+        "epochs": num_epochs,
+        'weight_decay': wd,
+        'batch_size': batch_size,
+        'run_name': run_name,
+        }
+    )
+    
+    # Print wandb run ID
+    wandb_id = wandb.run.id
+    wandb_url = wandb.run.get_url()
+    
+    print(f"WandB Run ID: {wandb_id}")
+    print(f"WandB Run URL: {wandb_url}")
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -244,7 +302,7 @@ def main():
 
     # Loss, optimizer, scheduler
     loss_fn = DiceCELoss(to_onehot_y=True, softmax=True)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
 
     # Metrics
@@ -260,22 +318,27 @@ def main():
 
         # Train
         if patching:
-            epoch_loss = train_epoch_patch(model, train_loader, optimizer, loss_fn, device)
+            train_loss = train_epoch_patch(model, train_loader, optimizer, loss_fn, device)
         else:
-            epoch_loss = train_epoch(model, train_loader, optimizer, loss_fn, device)
-        print(f"Average Loss: {epoch_loss:.4f}")
+            train_loss = train_epoch(model, train_loader, optimizer, loss_fn, device)
+        print(f"Average Loss: {train_loss:.4f}")
 
         scheduler.step()
 
         # Validate
         if (epoch + 1) % val_interval == 0:
-            dice_score = validate(model, val_loader, dice_metric, device, roi_size)
+            dice_score, val_loss = validate(model, val_loader, dice_metric, loss_fn, device, roi_size)
+            print(f"Validation Loss: {val_loss:.4f}")
             print(f"Validation Dice: {dice_score:.4f}")
 
+            #Log in wandb
+            wandb.log({"Train_loss": train_loss, "Validation_loss": val_loss, "epoch": epoch, "dice_score": dice_score})
+
             if dice_score > best_metric:
-                # best_metric = dice_score
-                # torch.save(model.state_dict(), "best_model.pth")
+                best_metric = dice_score
+                torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"{run_name}_{wandb_id}_best_model.pth"))
                 print(f"✓ Saved new best model!")
+                
 
     print(f"\n{'='*50}")
     print(f"Training completed! Best Dice: {best_metric:.4f}")
