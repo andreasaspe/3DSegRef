@@ -87,10 +87,6 @@ def get_train_transforms_patches(roi_size=(96, 96, 96), num_samples=2):
             image_threshold=0
         ),
                 # ADD THESE:
-        RandFlipd(keys=["image", "label"], spatial_axis=[0], prob=0.5),
-        RandFlipd(keys=["image", "label"], spatial_axis=[1], prob=0.5),
-        RandFlipd(keys=["image", "label"], spatial_axis=[2], prob=0.5),
-        RandRotate90d(keys=["image", "label"], prob=0.5, max_k=3),
         RandAffined(
             keys=["image", "label"], 
             prob=0.5,
@@ -105,14 +101,43 @@ def get_train_transforms_patches(roi_size=(96, 96, 96), num_samples=2):
     ])
     
 
-def get_val_transforms():
+def get_val_transforms(roi_size=(96, 96, 96), num_samples=2):
+    """Validation transforms - no augmentation."""
+    return Compose([
+        LoadImaged(keys=["image", "label"]),
+        EnsureChannelFirstd(keys=["image", "label"]),
+        SpatialPadd(
+            keys=["image"],
+            spatial_size=roi_size,
+            mode="constant",
+            value=-1.0
+        ),
+        SpatialPadd(
+            keys=["label"],
+            spatial_size=roi_size,
+            mode="constant",
+            value=0
+        ),
+        RandCropByPosNegLabeld(
+            keys=["image", "label"],
+            label_key="label",
+            spatial_size=roi_size,
+            pos=1,
+            neg=1,
+            num_samples=num_samples,
+            image_key="image",
+            image_threshold=0
+        ),
+        EnsureTyped(keys=["image", "label"])
+    ])
+
+def get_val_transforms_patches():
     """Validation transforms - no augmentation."""
     return Compose([
         LoadImaged(keys=["image", "label"]),
         EnsureChannelFirstd(keys=["image", "label"]),
         EnsureTyped(keys=["image", "label"])
     ])
-
 
 def train_epoch(model, loader, optimizer, loss_fn, device):
     """Train one epoch."""
@@ -138,7 +163,7 @@ def train_epoch(model, loader, optimizer, loss_fn, device):
     return epoch_loss / step
 
 
-def train_epoch_patch(model, loader, optimizer, loss_fn, device):
+def train_epoch_patches(model, loader, optimizer, loss_fn, device):
     """Train one epoch."""
     model.train()
     epoch_loss = 0
@@ -206,27 +231,62 @@ def validate(model, loader, dice_metric, loss_fn, device, roi_size=(96, 96, 96))
     return epoch_loss / step, metric
 
 
+
+def validate_patches(model, loader, dice_metric, loss_fn, device, roi_size=(96, 96, 96)):
+    """Validate with sliding window inference."""
+    model.eval()
+    
+    step = 0
+    val_loss = 0
+    
+    with torch.no_grad():
+        warnings.filterwarnings("ignore", category=UserWarning, message="Using a non-tuple sequence")
+        for batch_data in tqdm(loader, desc="Validation"):            
+            for patch_data in batch_data:
+                image = patch_data["image"].to(device)
+                label = patch_data["label"].to(device)
+                
+                # print(f"Image size: {image.shape}, Label size: {label.shape}")
+
+                # Forward pass
+                outputs = model(image)
+
+                # Calculate validation loss
+                loss = loss_fn(outputs, label)
+                val_loss += loss.item()
+                step += 1
+                
+                outputs = torch.argmax(outputs, dim=1, keepdim=True)
+                label = torch.argmax(label, dim=1, keepdim=True) if label.shape[1] > 1 else label
+
+                dice_metric(y_pred=outputs, y=label)
+
+    metric = dice_metric.aggregate().item()
+    dice_metric.reset()
+    return val_loss / step, metric
+
+
 def main():
     # Configuration
     data_dir = "/scratch/awias/data/SwinUNETR/Dataset013_TotalSegmentator_4organs/train"
     checkpoint_dir = "/scratch/awias/data/SwinUNETR/Dataset013_TotalSegmentator_4organs/checkpoints"
 
     # REMEMBER TO SET A RUN NAME
-    run_name = "Second_try"
+    run_name = "Trying_new_settings"
     print(f"\nHAVE YOU SET A NEW RUN NAME? CURRENT RUN NAME: {run_name}\n")
     
     # DEFINE STUFF
     parameters_dict = {
         'run_name': run_name,
-        'description': 'Second try. With data augmentation. Voxel size is 1.5 mm isotropic. Dataset is TotalsSegmentator4Organs.',
-        'epochs': 200,
+        'description': 'Little less data augmentation. No mirroring and such. Higher weight_decay and more num_samples per epoch. Also batch size is 2. Only val per 5 epochs. Voxel size is 1.5 mm isotropic. Dataset is TotalsSegmentator4Organs.',
+        'epochs': 1000,
         'learning_rate': 1e-4,
-        'weight_decay': 1e-5,
-        'batch_size': 1,
+        'weight_decay': 1e-4,
+        'batch_size': 2,
         'num_samples': 2, #Samples per patches
         'patching': True, # Whether to use patch-based training
         'roi_size': (96, 96, 96),
-        'val_interval': 2,
+        'val_interval': 5,
     }
 
     # Unpack parameters
@@ -288,7 +348,7 @@ def main():
 
     val_ds = Dataset(
         data=val_files,
-        transform=get_val_transforms()
+        transform=get_val_transforms(roi_size=roi_size, num_samples=10)
     )
 
     # Create dataloaders (num_workers=0 to avoid multiprocessing issues)
@@ -296,7 +356,7 @@ def main():
         train_ds,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,  # Use multiple workers
+        num_workers=12,  # Use multiple workers
         pin_memory=torch.cuda.is_available()
     )
 
@@ -304,7 +364,7 @@ def main():
         val_ds,
         batch_size=1,
         shuffle=False,
-        num_workers=4,  # Use multiple workers
+        num_workers=12,  # Use multiple workers
         pin_memory=torch.cuda.is_available()
     )
 
@@ -313,6 +373,7 @@ def main():
         in_channels=1,
         out_channels=5,
         feature_size=48,
+        drop_rate=0.2,  # Add dropout
         use_checkpoint=True,
         spatial_dims=3
     ).to(device)
@@ -335,25 +396,27 @@ def main():
 
         # Train
         if patching:
-            train_loss = train_epoch_patch(model, train_loader, optimizer, loss_fn, device)
+            train_loss = train_epoch_patches(model, train_loader, optimizer, loss_fn, device)
         else:
             train_loss = train_epoch(model, train_loader, optimizer, loss_fn, device)
         print(f"Average Loss: {train_loss:.4f}")
 
         scheduler.step()
+        # RandAffined(keys=["image", "label"], prob=0.3, rotate_range=(0.1, 0.1, 0.1)),
 
         # Validate
         if (epoch + 1) % val_interval == 0:
-            dice_score, val_loss = validate(model, val_loader, dice_metric, loss_fn, device, roi_size)
+            # val_loss, dice_score = validate(model, val_loader, dice_metric, loss_fn, device, roi_size)
+            val_loss, dice_score = validate_patches(model, val_loader, dice_metric, loss_fn, device, roi_size)
             print(f"Validation Loss: {val_loss:.4f}")
             print(f"Validation Dice: {dice_score:.4f}")
 
             #Log in wandb
-            wandb.log({"Train_loss": train_loss, "Validation_loss": val_loss, "epoch": epoch, "dice_score": dice_score})
+            wandb.log({"Train_loss": train_loss, "Validation_loss": val_loss, "epoch": epoch+1, "dice_score": dice_score})
 
             if dice_score > best_metric:
                 best_metric = dice_score
-                torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"{run_name}_{wandb_id}_epoch{epoch}_best_model.pth"))
+                torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"{run_name}_{wandb_id}_best_model.pth"))
                 print(f"✓ Saved new best model!")
                 
 
