@@ -8,3 +8,4 @@ uncertainty/__pycache__/uncertainty_eval.cpython-313.pyc
 uncertainty/__pycache__/model.cpython-313.pyc
 nnunet/TotalSegmentator/utils/__pycache__/get_data_loader.cpython-39.pyc
 nnunet/TotalSegmentator/utils/__pycache__/get_data_loader.cpython-313.pyc
+swinunet/wandb/

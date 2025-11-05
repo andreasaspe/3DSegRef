@@ -7,11 +7,15 @@ from monai.transforms import (
 from monai.data import Dataset, DataLoader
 from tqdm import tqdm
 
-def preprocess(data_dir, output_dir):
+def preprocess(data_dir, output_dir, split):
     os.makedirs(output_dir, exist_ok=True)
-
-    images_dir = os.path.join(data_dir, "imagesTr")
-    labels_dir = os.path.join(data_dir, "labelsTr")
+    
+    if split == 'train':
+        images_dir = os.path.join(data_dir, "imagesTr")
+        labels_dir = os.path.join(data_dir, "labelsTr")
+    if split == 'test':
+        images_dir = os.path.join(data_dir, "imagesTs")
+        labels_dir = os.path.join(data_dir, "labelsTs")
 
     image_files = sorted(glob(os.path.join(images_dir, "*_0000.nii.gz")))
     data_dicts = []
@@ -44,7 +48,7 @@ def preprocess(data_dir, output_dir):
                    output_dir=output_dir,
                    output_postfix="preproc",
                    output_ext=".nii.gz",
-                   separate_folder=True)
+                   separate_folder=False)
     ])
 
     ds = Dataset(data=data_dicts, transform=preproc)
@@ -54,4 +58,11 @@ def preprocess(data_dir, output_dir):
         _ = batch  # The SaveImaged transform already saves files to disk
 
 if __name__ == "__main__":
-    preprocess("/home/awias/data/SwinUNETR2", "/home/awias/data/SwinUNETR2_preprocessed")
+    input_path = "/scratch/awias/data/nnUNet/nnUNet_raw/Dataset013_TotalSegmentator_4organs"
+    output_path = "/scratch/awias/data/SwinUNETR/Dataset013_TotalSegmentator_4organs"
+    
+    output_path_train = os.path.join(output_path,'train')
+    output_path_test = os.path.join(output_path,'test')
+    
+    preprocess(input_path, output_path_train, split='train')
+    preprocess(input_path, output_path_test, split='test')
