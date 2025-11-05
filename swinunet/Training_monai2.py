@@ -194,7 +194,7 @@ def main():
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=0,  # NO WORKERS - process in main thread
         pin_memory=torch.cuda.is_available()
     )
