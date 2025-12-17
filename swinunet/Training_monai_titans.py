@@ -272,13 +272,13 @@ def main():
     checkpoint_dir = "/scratch/awias/data/SwinUNETR/Dataset013_TotalSegmentator_4organs/checkpoints"
 
     # REMEMBER TO SET A RUN NAME
-    run_name = "Trying_new_settings"
+    run_name = "DiceCELoss"
     print(f"\nHAVE YOU SET A NEW RUN NAME? CURRENT RUN NAME: {run_name}\n")
     
     # DEFINE STUFF
     parameters_dict = {
         'run_name': run_name,
-        'description': 'Little less data augmentation. No mirroring and such. Higher weight_decay and more num_samples per epoch. Also batch size is 2. Only val per 5 epochs. Voxel size is 1.5 mm isotropic. Dataset is TotalsSegmentator4Organs.',
+        'description': 'Same as before but with DiceCELoss instead of only Dice. Voxel size is 1.5 mm isotropic. Dataset is TotalsSegmentator4Organs.',
         'epochs': 1000,
         'learning_rate': 1e-4,
         'weight_decay': 1e-4,
