@@ -2,6 +2,7 @@ export nnUNet_raw="/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_raw"
 export nnUNet_results="/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_results"
 export nnUNet_preprocessed="/scratch/awias/data/Pancreas/nnUNet_dataset/nnUNet_preprocessed"
 
+conda activate nnunet_v2
 export nnUNet_raw=/scratch/awias/data/nnUNet_mob-seg3d/nnUNet_raw                                                                 
 export nnUNet_preprocessed=/scratch/awias/data/nnUNet_mob-seg3d/nnUNet_preprocessed                                               
 export nnUNet_results=/scratch/awias/data/nnUNet_mob-seg3d/nnUNet_results     
